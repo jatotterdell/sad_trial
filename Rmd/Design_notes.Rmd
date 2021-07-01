@@ -1,0 +1,818 @@
+---
+title: "Sequential Design for Social Anxiety Disorder Trial"
+date: "2021-06-30"
+output: 
+  bookdown::html_document2:
+    self_contained: yes
+    theme:
+      bootswatch: "journal"
+      # bg: "#202123"
+      # fg: "#B8BCC2"
+      primary: "#EA80FC"
+      secondary: "#00DAC6"
+      font_scale: 1
+      base_font:
+        google: Open Sans
+      heading_font:
+        google: Proza Libre
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+if (requireNamespace("thematic")) 
+  thematic::thematic_rmd(font = "auto")
+
+library(data.table)
+library(dtplyr)
+library(tidyverse)
+library(grid)
+library(gridExtra)
+library(gtable)
+library(patchwork)
+
+theme_set(theme_bw(base_size = 12))
+```
+
+
+```{r data}
+scenarios_dt <- readRDS(file = "~/out_files/mental_health_sims/mid_fixed_ss_scenarios.rds")
+res <- readRDS(file = "~/out_files/mental_health_sims/mid_fixed_ss_sims.rds")
+res_sum <- readRDS(file = "~/out_files/mental_health_sims/mid_fixed_ss_summary.rds")
+
+lvls <-  c("null", "small", "moderate", "large", "very large")
+scenarios_dt[, `:=`(effect1 = factor(effect1, levels = lvls),
+                    effect2 = factor(effect2, levels = lvls))]
+
+dat_trials <- res[scenarios_dt, on = .(scenario)]
+dat <- res_sum[scenarios_dt, on = .(scenario)]
+```
+
+# Design
+
+The primary outcome will be HAM-A score, a 14 item Likert scale with total scores ranging from 0 to 56.
+The endpoint is **8**-weeks post-randomisation.
+There will be 3 independent treatment arms: usual care, ketamine, ketamine + psychotherapy.
+The comparison will be baseline adjusted HAM-A score at 8 weeks after randomisation.
+
+The primary aim is to show effectiveness of at least one of the Ketamine arms relative to usual care,
+and the secondary aim is to select which of the two arms (possibly both) would proceed to larger Phase III trial.
+
+Define $\mu_j$ the mean HAM-A response on treatment $j=0,1,2$.
+Define $\delta_j = \mu_j-\mu_0$ mean difference relative to control for treatment $j=1,2$.
+Additionally, define
+$$
+\begin{aligned}
+\Pi_j &= \text{Pr}(\delta_j < 0 |y) \\
+\Pi_j^\star &= \text{Pr}(\delta_j < -\Delta_0|y) \\
+\Gamma &= \text{Pr}(\min(\delta_1,\delta_2) > -\Delta_1|y) \\
+\Psi &= \text{Pr}(|\delta_1-\delta_2|>\Delta_2|y) \\
+\Psi_{12}^\star &= \text{Pr}(\delta_1-\delta_2<\Delta_2|y) \\
+\Psi_{21}^\star &= \text{Pr}(\delta_2-\delta_1<\Delta_2|y) 
+\end{aligned}
+$$
+with $\Pi_j$ the posterior probability that treatment $j$ reduces HAM-A by some amount, $\Gamma$ the posterior probability that neither treatment reduces HAM-A by a meaningful amount $\Delta_1>0$, and $\Psi$ the posterior probability that there is a meaningful difference in effect between treatment 1 and 2 by amount $\Delta_2$.
+
+Ideally, the maximum sample size is sufficient such that either $\Pi_j>\epsilon\gg0.5$ for at least one $j=1,2$ or $\Gamma> \zeta\gg0.5$.
+That is, we can state with high posterior probability that at least one treatment works by some amount (proceed to Phase III with at least that treatment), or neither treatment works by a meaningful amount.
+
+Optionally, the maximum sample size is sufficient such that $\Psi>\psi\gg0.5$ or $\Psi < 1-\psi\ll0.5$ when the difference is large or small, so that we can state with high posterior probability that there is a meaningful difference between the effect of the two treatments or not.
+
+Suppose after some interim analysis we find $\Pi_j > \epsilon$ for one of the $j$, but $\Pi_j<\epsilon$ for the other.
+We may drop the control arm: this reduces the information on $\delta_j$ but increases the information on $|\delta_1-\delta_2|$.
+
+We expect:
+
+- up to 150 participants feasibly enrolled in the Phase II portion
+- around 1 - 2 participants enrolled per week.
+- frequent interim analyses
+
+
+# Outcome Generation
+
+HAM-A is an ordinal outcome, however for simplicity we may treat it as continuous.
+A lower score means a better outcome.
+Mean value of HAM-A at baseline expected to be approximately 20.
+Hypothesize a decrease to 18 in the control arm and to 10 in both Ketamine arms.
+Assume a SD of 4.5 in HAM-A in the usual care arm.
+
+For data generation, we assume a distribution of HAM-A scores at 8 weeks post-randomisation such that the mean response is about 18 under the control scenario.
+For the alternative, we consider a distribution shifted by an odds-ratio of 1/16,1/8, 1/4, or 1/2, which results in a distribution with mean response about 16, 14, 12, and 10 respectively.
+These are given in \@ref(fig:dist).
+
+```{r dist, fig.cap="Assumed control distribution (white lines) of HAM-A scores at 4-weeks post-randomisation and alternative distributions (coloured lines) for various effect size."}
+library(truncdist)
+library(Hmisc)
+library(sn)
+pt <- ptrunc(0:56, spec = "logis", a = -0.5, b = 56, 17.5, 3)
+p0 <- diff(c(0, pt))
+m0 <- sum(p0*0:56)
+s0 <- sqrt(sum(p0*(0:56 - m0)^2))
+or <- c(1/16, 1/8, 1/4, 1/2)
+p1 <- pomodm(p = p0, odds.ratio = or[1])
+m1 <- sum(p1*0:56)
+s1 <- sqrt(sum(p1*(0:56 - m1)^2))
+p2 <- pomodm(p = p0, odds.ratio = or[2])
+m2 <- sum(p2*0:56)
+p3 <- pomodm(p = p0, odds.ratio = or[3])
+m3 <- sum(p3*0:56)
+p4 <- pomodm(p = p0, odds.ratio = or[4])
+m4 <- sum(p4*0:56)
+
+Okabe_Ito <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+palette(Okabe_Ito)
+
+par(mar = c(4, 4, 1 ,1), oma = c(0, 0, 0, 0)+.1, mgp = c(2, 0.5, 0), tcl = -0.25)
+plot(0:56, p0, type = 'o', xlab = expression(y), ylab = expression("Pr"(Y*'='*y)), ylim = c(0, 0.1))
+abline(v = m0, lty = 1)
+points(0:56, p1, col = 2, type = 'o')
+abline(v = m1, col = 2)
+points(0:56, p2, col = 3, type = 'o')
+abline(v = m2, col = 3)
+points(0:56, p3, col = 4, type = 'o')
+abline(v = m3, col = 4)
+points(0:56, p4, col = 5, type = 'o')
+abline(v = m4, col = 5)
+```
+
+More complex data generation mechanisms could be explored, for example allowing HAM-A scores to be more variable,
+or allowing different variation conditional on treatment group, or allowing for generation from a mixture, where
+some participants are always responders irrespective of treatment option, and others only respond to active treatment, etc.
+
+However, only the scenario's presented in the figure are considered in what follows.
+
+The assumed model for the responses is
+$$
+\begin{aligned}
+Y_{i} &= \beta_0 + \beta_1\mathbb I(\texttt{treatment=1}) + \beta_2\mathbb I(\texttt{treatment=2}) + \epsilon_i \\
+\beta_0 &\sim N(18,10^2) \\
+\beta_1,\beta_2 &\sim N(0, 3.9^2) \implies \text{Pr}(\beta_j<-5)\approx 0.1,\ j=1,2 \\
+\epsilon_i|\sigma^2 &\sim N(0, \sigma^2) \\
+\sigma^2 &\sim \text{Inverse-Gamma}(0.01, 0.01)
+\end{aligned}
+$$
+
+# Fixed Sample Size
+
+For indicative purposes we consider the expected results of a fixed trial with a sample size of of 150 (50 per arm), 200 (67 per arm) and 250 (83 per arm) participants.
+At the end of the trial, we end up with a posterior distribution on the parameter models which would be used to inform decision making.
+
+For at least a moderate effect size, 150 participants between 3 arms would likely provide strong evidence of superiority of that treatment over usual care.
+For a very large effect size, 150 participants between 3 arms would likely provide strong evidence of superiority of that treatment by at least the MCID over usual care.
+
+
+```{r, fig.width=8, fig.height=8}
+sel_cols <- "scenario|trial|looks|epsilon|effect1|effect2|c_mu|c_sigma"
+pardat <- dat_trials[, .SD, .SDcols = grep(sel_cols, colnames(dat_trials), value = T)]
+
+pardat[, `:=`(
+  prdel1lt0 = pnorm(0, c_mu_1, sqrt(c_sigma_11)),
+  prdel2lt0 = pnorm(0, c_mu_2, sqrt(c_sigma_22)),
+  prdel1ltm5 = pnorm(-5, c_mu_1, sqrt(c_sigma_11)),
+  prdel2ltm5 = pnorm(-5, c_mu_2, sqrt(c_sigma_22)),
+  prdel1ltm25 = pnorm(-2.5, c_mu_1, sqrt(c_sigma_11)),
+  prdel2ltm25 = pnorm(-2.5, c_mu_2, sqrt(c_sigma_22)),
+  prdel1mdel2gt25 = 1-pnorm(2.5, abs(c_mu_3), sqrt(c_sigma_33)),
+  prdel1mdel2gt5 = 1-pnorm(5, abs(c_mu_3), sqrt(c_sigma_33)),
+  prdel1ninfdel225 = pnorm(2.5, c_mu_3, sqrt(c_sigma_33)),
+  prdel1ninfdel25 = pnorm(5, c_mu_3, sqrt(c_sigma_33))
+)]
+```
+
+
+```{r fixed-ss-dist1, fig.cap="Distribution of posterior probabilities that treatment 1 is superior to usual care."}
+ggplot(pardat[effect2 == "null" & epsilon == 0.85],
+      aes(prdel1lt0)) +
+  facet_grid(effect1 ~ looks) +
+  geom_histogram(breaks = seq(0, 1, 0.05)) +
+  labs(x = "Pr(Trt 1 - Usual care < 0|y)", y = "Number of trials (1,000 total)")
+```
+
+```{r fixed-ss-dist2, fig.cap="Distribution of posterior probabilities that treatment 1 is superior to usual care by at least 2.5."}
+ggplot(pardat[effect2 == "null" & epsilon == 0.85],
+      aes(prdel1ltm25)) +
+  facet_grid(effect1 ~ looks) +
+  geom_histogram(breaks = seq(0, 1, 0.05)) +
+  labs(x = "Pr(Trt 1 - Usual care < -2.5|y)", y = "Number of trials (1,000 total)")
+```
+
+```{r fixed-ss-dist3, fig.cap="Distribution of posterior probabilities that treatment 1 is superior to usual care by at least 5."}
+ggplot(pardat[effect2 == "null" & epsilon == 0.85],
+      aes(prdel1ltm5)) +
+  facet_grid(effect1 ~ looks) +
+  geom_histogram(breaks = seq(0, 1, 0.05)) +
+  labs(x = "Pr(Trt 1 - Usual care < -5|y)", y = "Number of trials (1,000 total)")
+```
+
+
+```{r fixed-ss-dist4, fig.cap="Distribution of posterior probabilities that difference between treatment 1 and treatment 2 less than 2.5 with $n=150$.", fig.width=8, fig.height=8}
+ggplot(pardat[epsilon == 0.85 & looks == 150],
+       aes(prdel1mdel2gt25)) +
+  facet_grid(effect1 ~ effect2) +
+  geom_histogram() +
+  labs(x = "Pr(|delta1 - delta2|>2.5|y)", y = "Frequency")
+```
+
+```{r fixed-ss-dist5, fig.cap="Distribution of posterior probabilities that difference between treatment 1 and treatment 2 less than 2.5 with $n=250$.", fig.width=8, fig.height=8}
+ggplot(pardat[epsilon == 0.85 & looks == 250],
+       aes(prdel1mdel2gt25)) +
+  facet_grid(effect1 ~ effect2) +
+  geom_histogram() +
+  labs(x = "Pr(|delta1 - delta2|>2.5|y)", y = "Frequency")
+```
+
+
+```{r fixed-ss-dist6, fig.cap="Distribution of posterior probabilities that absolute difference between treatment 1 and treatment 2 less than 5.", fig.width=8, fig.height=8}
+ggplot(pardat[epsilon == 0.85 & looks == 150],
+       aes(prdel1mdel2gt5)) +
+  facet_grid(effect1 ~ effect2) +
+  geom_histogram() +
+  labs(x = "Pr(|delta1 - delta2|>5|y)", y = "Frequency")
+```
+
+```{r fixed-ss-dist7, fig.cap="Distribution of posterior probabilities that absolute difference between treatment 1 and treatment 2 less than 5 with $n=150$.", fig.width=8, fig.height=8}
+ggplot(pardat[epsilon == 0.85 & looks == 150],
+       aes(prdel1mdel2gt5)) +
+  facet_grid(effect1 ~ effect2) +
+  geom_histogram() +
+  labs(x = "Pr(|delta1 - delta2|>5|y)", y = "Frequency")
+```
+
+```{r fixed-ss-dist8, fig.cap="Distribution of posterior probabilities that absolute difference between treatment 1 and treatment 2 less than 5 with $n=250$."}
+ggplot(pardat[epsilon == 0.85 & looks == 250],
+       aes(prdel1mdel2gt5)) +
+  facet_grid(effect1 ~ effect2) +
+  geom_histogram() +
+  labs(x = "Pr(|delta1 - delta2|>5|y)", y = "Frequency")
+```
+
+
+```{r fixed-ss-dist9, fig.cap="Distribution of posterior probabilities that difference between treatment 1 and treatment 2 less than 2.5."}
+ggplot(pardat[epsilon == 0.85 & looks == 150],
+       aes(prdel1ninfdel225)) +
+  facet_grid(effect1 ~ effect2, labeller = label_both, switch = "y") +
+  geom_histogram() +
+  labs(x = "Pr(delta1 - delta2<2.5|y)", y = "Frequency")
+```
+
+
+```{r}
+ggplot(pardat[epsilon == 0.85 & looks == 200],
+       aes(prdel1mdel2gt5)) +
+  facet_grid(effect1 ~ effect2) +
+  geom_histogram()
+```
+
+
+```{r}
+ggplot(pardat[epsilon == 0.85 & looks == 250],
+       aes(prdel1mdel2gt5)) +
+  facet_grid(effect1 ~ effect2) +
+  geom_histogram()
+```
+
+
+```{r fixed-ss-threshold, fig.cap="Expected probability (across trials) that the posterior probability (given the trial specific data) exceeds the given threshold.", fig.width=8, fig.height=7}
+pdat_postprob <- dcast(pardat[epsilon == 0.85 & effect2 == "null"], looks + effect1 ~ ., 
+      fun = list(`0.8` = \(x) mean(x > 0.8),
+                 `0.85` = \(x) mean(x > 0.85),
+                 `0.9` = \(x) mean(x > 0.9),
+                 `0.925` = \(x) mean(x > 0.925),
+                 `0.95` = \(x) mean(x > 0.95),
+                 `0.975` = \(x) mean(x > 0.975),
+                 `0.99` = \(x) mean(x > 0.99)), 
+      value.var = c("prdel1lt0", "prdel1ltm25", "prdel1ltm5"))
+pdat_postprob <- melt(pdat_postprob, id.vars = c("looks", "effect1"))
+pdat_postprob[, c("comparison", "threshold") := tstrsplit(variable, "_", fixed = TRUE)]
+
+ggplot(pdat_postprob,
+      aes(threshold, value, group = comparison, colour = comparison)) +
+  facet_grid(effect1 ~ looks, scales = "free_y") +
+  geom_point() +
+  geom_linerange(aes(
+    ymin = value - qnorm(0.975)*sqrt(value*(1-value)/1e3),
+    ymax = value + qnorm(0.975)*sqrt(value*(1-value)/1e3))) +
+  labs(x = "Threshold (epsilon)", y = "Probability (95% CI) that\nposterior probability > threshold",
+       colour = "Quantity") +
+  scale_colour_discrete(label = c("Pr(delta1 < 0|y)>epsilon", "Pr(delta1<-2.5|y)>epsilon", "Pr(delta1<-5|y)>epsilon")) +
+  theme(legend.position = "top", legend.direction = "vertical")
+```
+
+# Example Trials
+
+The below figures present simulated interim results from three example trials.
+In these trials there was only one decision rule enfroced: that the usual care arm is dropped when either arm 1 or arm 2 is superior by a margin of at least -5 in mean HAM-A with more than 0.85 posterior probability. That is
+$$
+\text{Pr}(\mu_1-\mu_0<-5|y)>0.85\text{ or }\text{Pr}(\mu_2-\mu_0<-5)>0.85.
+$$
+No other decision rules are enforced.
+
+## Example 1
+
+```{r}
+ex1 <- readRDS("~/out_files/mental_health_sims/example_trial1.rds")
+
+tcols <- "analysis|n_enr|n_obs|y_obs"
+tabex1 <- ex1[, .SD, .SDcols = grep(tcols, colnames(ex1), value = T)]
+tabex1 <- melt(tabex1, id.vars = "analysis")
+tabex1[, c("variable", "arm") := tstrsplit(variable, "(?<=[A-Za-z])(?=[0-9])", perl = T)]
+tabex1[, variable := factor(variable, labels = c("Enrolled", "Observed", "Outcome"))]
+tabex1 <- dcast(tabex1, analysis + arm ~ variable, value.var = "value")
+setnames(tabex1, c("analysis", "arm"), c("Analysis", "Arm"))
+tabex1[, Outcome := sprintf("%.1f", Outcome)]
+
+ctrpars <- "analysis|c_mu|c_sigma"
+ctrex <- ex1[, .SD, .SDcols = grep(ctrpars, colnames(ex1), value = T)]
+ctrex[, `1_2joint-MID` := 1 - mvtnorm::pmvnorm(
+  rep(-2.5,2), rep(Inf,2), 
+  c(c_mu_1, c_mu_2), sigma = matrix(c(c_sigma_11, c_sigma_21, c_sigma_21, c_sigma_22),2,2)), by = 1:nrow(ctrex)]
+ctrex <- ctrex[, .(
+  Analysis = analysis,
+  `1_2joint-MID`,
+  `1_0-0` = pnorm(0, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-0` = pnorm(0, c_mu_2, sqrt(c_sigma_22)),
+  `1_2-0` = 1-pnorm(2.5, abs(c_mu_3), sqrt(c_sigma_33)),
+  `1_0-MID` = pnorm(-5, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-MID` = pnorm(-5, c_mu_2, sqrt(c_sigma_22)),
+  `1_0-MID2` = pnorm(-2.5, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-MID2` = pnorm(-2.5, c_mu_2, sqrt(c_sigma_22))
+)]
+
+ctrex <- melt(ctrex, id.var = "Analysis")
+ctrex[, c("Arm", "Comparison-Reference") := tstrsplit(variable, "_", fixed = TRUE)]
+ctrex[, variable := NULL]
+ctrex <- dcast(ctrex, Analysis + Arm ~ `Comparison-Reference`, value.var = "value")
+ctrex <- ctrex[, .(
+  Analysis,
+  Arm,
+  `P(d<0)` = sprintf("%.2f", `0-0`),
+  `P(d<-5)` = sprintf("%.2f", `0-MID`),
+  `P(d<-2.5)` = sprintf("%.2f", `0-MID2`),
+  `P(|d1-d2|>2.5)` = sprintf("%.2f", `2-0`),
+  `P(one<-2.5)` = sprintf("%.2f", `2joint-MID`)
+)]
+
+tpars <- "analysis|b_mu_[1-2]|b_sigma_(11|22)|m_mu|m_sigma_(00|11|22)"
+parex1 <- ex1[, .SD, .SDcols = grep(tpars, colnames(ex1), value = T)]
+parex1 <- melt(parex1, id.vars = "analysis")
+parex1[, c("variable", "arm") := tstrsplit(variable, "(?<=[A-Za-z])_(?=[0-9]+)", perl = T)]
+parex1[, variable := gsub("", "", variable)]
+parex1[, arm := fcase(arm == "0", "0",
+                      arm == "00", "0",
+                      arm == "1", "1", 
+                      arm == "11", "1", 
+                      arm == "2", "2",
+                      arm == "22", "2")]
+parex1 <- dcast(parex1, analysis + arm ~ variable, value.var = "value")
+setnames(parex1, c("analysis", "arm"), c("Analysis", "Arm"))
+
+ttheme_vals <- ttheme_default(
+  10,
+  core = list(
+    bg_params = list(col = "white", fill = NULL))
+)
+
+make_analysis_summary <- function(K) {
+  p1 <- ggplot(data.frame(x = c(min(parex1$m_mu) - 4, 
+                                max(parex1$m_mu) + 4)), 
+                          aes(x)) +
+    stat_function(fun = dnorm, aes(colour = "0"), args = list(
+      mean = parex1[Analysis == K, m_mu][1],
+      sd = sqrt(parex1[Analysis == K, m_sigma][1]))) +
+    stat_function(fun = dnorm, aes(colour = "1"), args = list(
+      mean = parex1[Analysis == K, m_mu][2],
+      sd = sqrt(parex1[Analysis == K, m_sigma][2]))) +
+    stat_function(fun = dnorm, aes(colour = "2"), args = list(
+      mean = parex1[Analysis == K, m_mu][3],
+      sd = sqrt(parex1[Analysis == K, m_sigma][3]))) +
+    scale_colour_manual("Arm", values = 1:3, labels = 0:2) +
+    labs(x = "Mean HAM-A", y = "Posterior density") +
+    theme(legend.position = "top")
+  p2 <- ggplot(data.frame(x = c(-10, 10)), aes(x)) +
+    stat_function(fun = dnorm, aes(colour = "1"), args = list(
+      mean = parex1[Analysis == K, b_mu][2],
+      sd = sqrt(parex1[Analysis == K, b_sigma][2]))) +
+    stat_function(fun = dnorm, aes(colour = "2"), args = list(
+      mean = parex1[Analysis == K, b_mu][3],
+      sd = sqrt(parex1[Analysis == K, b_sigma][3]))) +
+    stat_function(fun = dnorm, aes(colour = "3"), args = list(
+      mean = ex1[analysis == K, c_mu_3],
+      sd = sqrt(ex1[analysis == K, c_sigma_33]))) +
+    geom_vline(xintercept = 0, linetype = 2) +
+    geom_vline(xintercept = -5, linetype = 3) +
+    scale_colour_manual("Comparison", values = 2:4, labels = c("1-0", "2-0", "1-2")) +
+    scale_x_continuous(breaks = seq(-10,10,2.5)) + 
+    labs(x = "Mean difference HAM-A", y = "Posterior density") +
+    theme(legend.position = "top")
+  g1 <- tableGrob(tabex1[Analysis == K, !"Analysis"], theme = ttheme_vals, rows = NULL)
+  g2 <- tableGrob(ctrex[Analysis == K, !"Analysis"], theme = ttheme_vals, rows = NULL)
+  return(((p1 / g1)  | (p2 / g2))  )
+}
+```
+
+
+```{r ex1-analysis-1, fig.cap = "Analysis 1 (30 participants followed-up)", fig.width=8}
+make_analysis_summary(1)
+```
+
+```{r ex1-analysis-2, fig.cap = "Analysis 2 (60 participants followed-up)", fig.width=8}
+make_analysis_summary(2)
+```
+
+```{r ex1-analysis-3, fig.cap = "Analysis 3 (90 participants followed-up)", fig.width=8}
+make_analysis_summary(3)
+```
+
+```{r ex1-analysis-4, fig.cap = "Analysis 4 (120 participants followed-up)", fig.width=8}
+make_analysis_summary(4)
+```
+
+```{r ex1-analysis-5, fig.cap = "Analysis 5 (150 participants followed-up)", fig.width=8}
+make_analysis_summary(5)
+```
+
+## Example 2
+
+```{r}
+ex1 <- readRDS("~/out_files/mental_health_sims/example_trial2.rds")
+
+tcols <- "analysis|n_enr|n_obs|y_obs"
+tabex1 <- ex1[, .SD, .SDcols = grep(tcols, colnames(ex1), value = T)]
+tabex1 <- melt(tabex1, id.vars = "analysis")
+tabex1[, c("variable", "arm") := tstrsplit(variable, "(?<=[A-Za-z])(?=[0-9])", perl = T)]
+tabex1[, variable := factor(variable, labels = c("Enrolled", "Observed", "Outcome"))]
+tabex1 <- dcast(tabex1, analysis + arm ~ variable, value.var = "value")
+setnames(tabex1, c("analysis", "arm"), c("Analysis", "Arm"))
+tabex1[, Outcome := sprintf("%.1f", Outcome)]
+
+ctrpars <- "analysis|c_mu|c_sigma"
+ctrex <- ex1[, .SD, .SDcols = grep(ctrpars, colnames(ex1), value = T)]
+ctrex[, `1_2joint-MID` := 1 - mvtnorm::pmvnorm(
+  rep(-2.5,2), rep(Inf,2), 
+  c(c_mu_1, c_mu_2), sigma = matrix(c(c_sigma_11, c_sigma_21, c_sigma_21, c_sigma_22),2,2)), by = 1:nrow(ctrex)]
+ctrex <- ctrex[, .(
+  Analysis = analysis,
+  `1_2joint-MID`,
+  `1_0-0` = pnorm(0, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-0` = pnorm(0, c_mu_2, sqrt(c_sigma_22)),
+  `1_2-0` = 1-pnorm(2.5, abs(c_mu_3), sqrt(c_sigma_33)),
+  `1_0-MID` = pnorm(-5, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-MID` = pnorm(-5, c_mu_2, sqrt(c_sigma_22)),
+  `1_0-MID2` = pnorm(-2.5, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-MID2` = pnorm(-2.5, c_mu_2, sqrt(c_sigma_22))
+)]
+
+ctrex <- melt(ctrex, id.var = "Analysis")
+ctrex[, c("Arm", "Comparison-Reference") := tstrsplit(variable, "_", fixed = TRUE)]
+ctrex[, variable := NULL]
+ctrex <- dcast(ctrex, Analysis + Arm ~ `Comparison-Reference`, value.var = "value")
+ctrex <- ctrex[, .(
+  Analysis,
+  Arm,
+  `P(d<0)` = sprintf("%.2f", `0-0`),
+  `P(d<-5)` = sprintf("%.2f", `0-MID`),
+  `P(d<-2.5)` = sprintf("%.2f", `0-MID2`),
+  `P(|d1-d2|>2.5)` = sprintf("%.2f", `2-0`),
+  `P(one<-2.5)` = sprintf("%.2f", `2joint-MID`)
+)]
+
+tpars <- "analysis|b_mu_[1-2]|b_sigma_(11|22)|m_mu|m_sigma_(00|11|22)"
+parex1 <- ex1[, .SD, .SDcols = grep(tpars, colnames(ex1), value = T)]
+parex1 <- melt(parex1, id.vars = "analysis")
+parex1[, c("variable", "arm") := tstrsplit(variable, "(?<=[A-Za-z])_(?=[0-9]+)", perl = T)]
+parex1[, variable := gsub("", "", variable)]
+parex1[, arm := fcase(arm == "0", "0",
+                      arm == "00", "0",
+                      arm == "1", "1", 
+                      arm == "11", "1", 
+                      arm == "2", "2",
+                      arm == "22", "2")]
+parex1 <- dcast(parex1, analysis + arm ~ variable, value.var = "value")
+setnames(parex1, c("analysis", "arm"), c("Analysis", "Arm"))
+```
+
+
+```{r ex2-analysis-1, fig.cap = "Analysis 1 (30 participants followed-up)", fig.width=8}
+make_analysis_summary(1)
+```
+
+```{r ex2-analysis-2, fig.cap = "Analysis 2 (60 participants followed-up)", fig.width=8}
+make_analysis_summary(2)
+```
+
+```{r ex2-analysis-3, fig.cap = "Analysis 3 (90 participants followed-up)", fig.width=8}
+make_analysis_summary(3)
+```
+
+```{r ex2-analysis-4, fig.cap = "Analysis 4 (120 participants followed-up)", fig.width=8}
+make_analysis_summary(4)
+```
+
+```{r ex2-analysis-5, fig.cap = "Analysis 5 (150 participants followed-up)", fig.width=8}
+make_analysis_summary(5)
+```
+
+## Example 3
+
+```{r}
+ex1 <- readRDS("~/out_files/mental_health_sims/example_trial3.rds")
+
+tcols <- "analysis|n_enr|n_obs|y_obs"
+tabex1 <- ex1[, .SD, .SDcols = grep(tcols, colnames(ex1), value = T)]
+tabex1 <- melt(tabex1, id.vars = "analysis")
+tabex1[, c("variable", "arm") := tstrsplit(variable, "(?<=[A-Za-z])(?=[0-9])", perl = T)]
+tabex1[, variable := factor(variable, labels = c("Enrolled", "Observed", "Outcome"))]
+tabex1 <- dcast(tabex1, analysis + arm ~ variable, value.var = "value")
+setnames(tabex1, c("analysis", "arm"), c("Analysis", "Arm"))
+tabex1[, Outcome := sprintf("%.1f", Outcome)]
+
+ctrpars <- "analysis|c_mu|c_sigma"
+ctrex <- ex1[, .SD, .SDcols = grep(ctrpars, colnames(ex1), value = T)]
+ctrex[, `1_2joint-MID` := 1 - mvtnorm::pmvnorm(
+  rep(-2.5,2), rep(Inf,2), 
+  c(c_mu_1, c_mu_2), sigma = matrix(c(c_sigma_11, c_sigma_21, c_sigma_21, c_sigma_22),2,2)), by = 1:nrow(ctrex)]
+ctrex <- ctrex[, .(
+  Analysis = analysis,
+  `1_2joint-MID`,
+  `1_0-0` = pnorm(0, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-0` = pnorm(0, c_mu_2, sqrt(c_sigma_22)),
+  `1_2-0` = 1-pnorm(2.5, abs(c_mu_3), sqrt(c_sigma_33)),
+  `1_0-MID` = pnorm(-5, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-MID` = pnorm(-5, c_mu_2, sqrt(c_sigma_22)),
+  `1_0-MID2` = pnorm(-2.5, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-MID2` = pnorm(-2.5, c_mu_2, sqrt(c_sigma_22))
+)]
+
+ctrex <- melt(ctrex, id.var = "Analysis")
+ctrex[, c("Arm", "Comparison-Reference") := tstrsplit(variable, "_", fixed = TRUE)]
+ctrex[, variable := NULL]
+ctrex <- dcast(ctrex, Analysis + Arm ~ `Comparison-Reference`, value.var = "value")
+ctrex <- ctrex[, .(
+  Analysis,
+  Arm,
+  `P(d<0)` = sprintf("%.2f", `0-0`),
+  `P(d<-5)` = sprintf("%.2f", `0-MID`),
+  `P(d<-2.5)` = sprintf("%.2f", `0-MID2`),
+  `P(|d1-d2|>2.5)` = sprintf("%.2f", `2-0`),
+  `P(one<-2.5)` = sprintf("%.2f", `2joint-MID`)
+)]
+
+tpars <- "analysis|b_mu_[1-2]|b_sigma_(11|22)|m_mu|m_sigma_(00|11|22)"
+parex1 <- ex1[, .SD, .SDcols = grep(tpars, colnames(ex1), value = T)]
+parex1 <- melt(parex1, id.vars = "analysis")
+parex1[, c("variable", "arm") := tstrsplit(variable, "(?<=[A-Za-z])_(?=[0-9]+)", perl = T)]
+parex1[, variable := gsub("", "", variable)]
+parex1[, arm := fcase(arm == "0", "0",
+                      arm == "00", "0",
+                      arm == "1", "1", 
+                      arm == "11", "1", 
+                      arm == "2", "2",
+                      arm == "22", "2")]
+parex1 <- dcast(parex1, analysis + arm ~ variable, value.var = "value")
+setnames(parex1, c("analysis", "arm"), c("Analysis", "Arm"))
+```
+
+```{r ex4-analysis-1, fig.cap = "Analysis 1 (30 participants followed-up)", fig.width=8}
+make_analysis_summary(1)
+```
+
+```{r ex4-analysis-2, fig.cap = "Analysis 2 (60 participants followed-up)", fig.width=8}
+make_analysis_summary(2)
+```
+
+```{r ex4-analysis-3, fig.cap = "Analysis 3 (90 participants followed-up)", fig.width=8}
+make_analysis_summary(3)
+```
+
+```{r ex4-analysis-4, fig.cap = "Analysis 4 (120 participants followed-up)", fig.width=8}
+make_analysis_summary(4)
+```
+
+```{r ex4-analysis-5, fig.cap = "Analysis 5 (150 participants followed-up)", fig.width=8}
+make_analysis_summary(5)
+```
+
+
+
+## Example 4
+
+In these next two trials there was only one decision rule enfroced: that the usual care arm is dropped when either arm 1 or arm 2 is superior by a margin of at least -5 in mean HAM-A with more than 0.85 posterior probability. That is
+$$
+\text{Pr}(\mu_1-\mu_0<0|y)>0.95\text{ or }\text{Pr}(\mu_2-\mu_0<0)>0.95.
+$$
+No other decision rules are enforced.
+
+
+```{r}
+ex1 <- readRDS("~/out_files/mental_health_sims/example_trial4.rds")
+
+tcols <- "analysis|n_enr|n_obs|y_obs"
+tabex1 <- ex1[, .SD, .SDcols = grep(tcols, colnames(ex1), value = T)]
+tabex1 <- melt(tabex1, id.vars = "analysis")
+tabex1[, c("variable", "arm") := tstrsplit(variable, "(?<=[A-Za-z])(?=[0-9])", perl = T)]
+tabex1[, variable := factor(variable, labels = c("Enrolled", "Observed", "Outcome"))]
+tabex1 <- dcast(tabex1, analysis + arm ~ variable, value.var = "value")
+setnames(tabex1, c("analysis", "arm"), c("Analysis", "Arm"))
+tabex1[, Outcome := sprintf("%.1f", Outcome)]
+
+ctrpars <- "analysis|c_mu|c_sigma"
+ctrex <- ex1[, .SD, .SDcols = grep(ctrpars, colnames(ex1), value = T)]
+ctrex[, `1_2joint-MID` := 1 - mvtnorm::pmvnorm(
+  rep(-2.5,2), rep(Inf,2), 
+  c(c_mu_1, c_mu_2), sigma = matrix(c(c_sigma_11, c_sigma_21, c_sigma_21, c_sigma_22),2,2)), by = 1:nrow(ctrex)]
+ctrex <- ctrex[, .(
+  Analysis = analysis,
+  `1_2joint-MID`,
+  `1_0-0` = pnorm(0, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-0` = pnorm(0, c_mu_2, sqrt(c_sigma_22)),
+  `1_2-0` = 1-pnorm(2.5, abs(c_mu_3), sqrt(c_sigma_33)),
+  `1_0-MID` = pnorm(-5, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-MID` = pnorm(-5, c_mu_2, sqrt(c_sigma_22)),
+  `1_0-MID2` = pnorm(-2.5, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-MID2` = pnorm(-2.5, c_mu_2, sqrt(c_sigma_22))
+)]
+
+ctrex <- melt(ctrex, id.var = "Analysis")
+ctrex[, c("Arm", "Comparison-Reference") := tstrsplit(variable, "_", fixed = TRUE)]
+ctrex[, variable := NULL]
+ctrex <- dcast(ctrex, Analysis + Arm ~ `Comparison-Reference`, value.var = "value")
+ctrex <- ctrex[, .(
+  Analysis,
+  Arm,
+  `P(d<0)` = sprintf("%.2f", `0-0`),
+  `P(d<-5)` = sprintf("%.2f", `0-MID`),
+  `P(d<-2.5)` = sprintf("%.2f", `0-MID2`),
+  `P(|d1-d2|>2.5)` = sprintf("%.2f", `2-0`),
+  `P(one<-2.5)` = sprintf("%.2f", `2joint-MID`)
+)]
+
+tpars <- "analysis|b_mu_[1-2]|b_sigma_(11|22)|m_mu|m_sigma_(00|11|22)"
+parex1 <- ex1[, .SD, .SDcols = grep(tpars, colnames(ex1), value = T)]
+parex1 <- melt(parex1, id.vars = "analysis")
+parex1[, c("variable", "arm") := tstrsplit(variable, "(?<=[A-Za-z])_(?=[0-9]+)", perl = T)]
+parex1[, variable := gsub("", "", variable)]
+parex1[, arm := fcase(arm == "0", "0",
+                      arm == "00", "0",
+                      arm == "1", "1", 
+                      arm == "11", "1", 
+                      arm == "2", "2",
+                      arm == "22", "2")]
+parex1 <- dcast(parex1, analysis + arm ~ variable, value.var = "value")
+setnames(parex1, c("analysis", "arm"), c("Analysis", "Arm"))
+```
+
+```{r ex5-analysis-1, fig.cap = "Analysis 1 (30 participants followed-up)", fig.width=8}
+make_analysis_summary(1)
+```
+
+```{r ex5-analysis-2, fig.cap = "Analysis 2 (60 participants followed-up)", fig.width=8}
+make_analysis_summary(2)
+```
+
+```{r ex5-analysis-3, fig.cap = "Analysis 3 (90 participants followed-up)", fig.width=8}
+make_analysis_summary(3)
+```
+
+```{r ex5-analysis-4, fig.cap = "Analysis 4 (120 participants followed-up)", fig.width=8}
+make_analysis_summary(4)
+```
+
+```{r ex5-analysis-5, fig.cap = "Analysis 5 (150 participants followed-up)", fig.width=8}
+make_analysis_summary(5)
+```
+
+
+## Example 5
+
+```{r}
+ex1 <- readRDS("~/out_files/mental_health_sims/example_trial5.rds")
+
+tcols <- "analysis|n_enr|n_obs|y_obs"
+tabex1 <- ex1[, .SD, .SDcols = grep(tcols, colnames(ex1), value = T)]
+tabex1 <- melt(tabex1, id.vars = "analysis")
+tabex1[, c("variable", "arm") := tstrsplit(variable, "(?<=[A-Za-z])(?=[0-9])", perl = T)]
+tabex1[, variable := factor(variable, labels = c("Enrolled", "Observed", "Outcome"))]
+tabex1 <- dcast(tabex1, analysis + arm ~ variable, value.var = "value")
+setnames(tabex1, c("analysis", "arm"), c("Analysis", "Arm"))
+tabex1[, Outcome := sprintf("%.1f", Outcome)]
+
+ctrpars <- "analysis|c_mu|c_sigma"
+ctrex <- ex1[, .SD, .SDcols = grep(ctrpars, colnames(ex1), value = T)]
+ctrex[, `1_2joint-MID` := 1 - mvtnorm::pmvnorm(
+  rep(-2.5,2), rep(Inf,2), 
+  c(c_mu_1, c_mu_2), sigma = matrix(c(c_sigma_11, c_sigma_21, c_sigma_21, c_sigma_22),2,2)), by = 1:nrow(ctrex)]
+ctrex <- ctrex[, .(
+  Analysis = analysis,
+  `1_2joint-MID`,
+  `1_0-0` = pnorm(0, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-0` = pnorm(0, c_mu_2, sqrt(c_sigma_22)),
+  `1_2-0` = 1-pnorm(2.5, abs(c_mu_3), sqrt(c_sigma_33)),
+  `1_0-MID` = pnorm(-5, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-MID` = pnorm(-5, c_mu_2, sqrt(c_sigma_22)),
+  `1_0-MID2` = pnorm(-2.5, c_mu_1, sqrt(c_sigma_11)),
+  `2_0-MID2` = pnorm(-2.5, c_mu_2, sqrt(c_sigma_22))
+)]
+
+ctrex <- melt(ctrex, id.var = "Analysis")
+ctrex[, c("Arm", "Comparison-Reference") := tstrsplit(variable, "_", fixed = TRUE)]
+ctrex[, variable := NULL]
+ctrex <- dcast(ctrex, Analysis + Arm ~ `Comparison-Reference`, value.var = "value")
+ctrex <- ctrex[, .(
+  Analysis,
+  Arm,
+  `P(d<0)` = sprintf("%.2f", `0-0`),
+  `P(d<-5)` = sprintf("%.2f", `0-MID`),
+  `P(d<-2.5)` = sprintf("%.2f", `0-MID2`),
+  `P(|d1-d2|>2.5)` = sprintf("%.2f", `2-0`),
+  `P(one<-2.5)` = sprintf("%.2f", `2joint-MID`)
+)]
+
+tpars <- "analysis|b_mu_[1-2]|b_sigma_(11|22)|m_mu|m_sigma_(00|11|22)"
+parex1 <- ex1[, .SD, .SDcols = grep(tpars, colnames(ex1), value = T)]
+parex1 <- melt(parex1, id.vars = "analysis")
+parex1[, c("variable", "arm") := tstrsplit(variable, "(?<=[A-Za-z])_(?=[0-9]+)", perl = T)]
+parex1[, variable := gsub("", "", variable)]
+parex1[, arm := fcase(arm == "0", "0",
+                      arm == "00", "0",
+                      arm == "1", "1", 
+                      arm == "11", "1", 
+                      arm == "2", "2",
+                      arm == "22", "2")]
+parex1 <- dcast(parex1, analysis + arm ~ variable, value.var = "value")
+setnames(parex1, c("analysis", "arm"), c("Analysis", "Arm"))
+```
+
+```{r ex3-analysis-1, fig.cap = "Analysis 1 (30 participants followed-up)", fig.width=8}
+make_analysis_summary(1)
+```
+
+```{r ex3-analysis-2, fig.cap = "Analysis 2 (60 participants followed-up)", fig.width=8}
+make_analysis_summary(2)
+```
+
+```{r ex3-analysis-3, fig.cap = "Analysis 3 (90 participants followed-up)", fig.width=8}
+make_analysis_summary(3)
+```
+
+```{r ex3-analysis-4, fig.cap = "Analysis 4 (120 participants followed-up)", fig.width=8}
+make_analysis_summary(4)
+```
+
+```{r ex3-analysis-5, fig.cap = "Analysis 5 (150 participants followed-up)", fig.width=8}
+make_analysis_summary(5)
+```
+
+# Operating Characteristics
+
+The following is assumed:
+
+- fixed accrual of 1.5 participants per week
+- 8 weeks to observe primary endpoint
+- analysis when: 30, 60, 90, 120, and final at 150 participants reaching primary endpoint; alternatively, extend analyses up to 240 participants with interims every 30 with follow-up
+- control outcome distribution as per figure \@ref(fig:dist)
+- treatment outcome 1 distributions assuming: null, moderate, large, and very large effect
+- treatment outcome 2 distributions assuming: null, moderate, large, and very large effect
+- decision to cease allocation to control if *any* of the two treatments, $j=1,2$:
+    - is superior to usual care $\text{Pr}(\mu_j - \mu_0 < 0)>\epsilon$
+    - is superior to usual care by MID $\text{Pr}(\mu_j-\mu_0 < -\text{MID}) > \epsilon$ where $\text{MID}=5$.
+- no decision rule enforced on the comparison of treatment 1 and 2, but could stop for superiority if one clearly better than the other by some margin $\Delta\geq 0$, i.e. $\text{Pr}(\mu_1-\mu_2<-\Delta)>\epsilon$ or $\text{Pr}(\mu_1-\mu_2<-\Delta)<1-\epsilon$.
+
+
+
+```{r data-oc}
+scenarios_dt <- readRDS(file = "~/out_files/mental_health_sims/basic_sequential_scenarios2.rds")
+res <- readRDS(file = "~/out_files/mental_health_sims/basic_sequential_sims2.rds")
+res_sum <- readRDS(file = "~/out_files/mental_health_sims/basic_sequential_summary2.rds")
+
+lvls <-  c("null", "small", "moderate", "large", "very large")
+scenarios_dt[, `:=`(effect1 = factor(effect1, levels = lvls),
+                    effect2 = factor(effect2, levels = lvls))]
+
+dat_trials <- res[scenarios_dt, on = .(scenario)]
+dat <- res_sum[scenarios_dt, on = .(scenario)]
+```
+
+
+```{r, fig.cap="Expected probability that control arm is dropped using MID=0.", fig.width=8, fig.height=8}
+ggplot(dat[MID == 0],
+       aes(x = analysis, y = drp0, colour = factor(sapply(looks, max)), shape = factor(epsilon))) +
+  facet_grid(effect1 ~ effect2) +
+  geom_point(position = position_dodge(width = 1)) +
+  geom_linerange(aes(ymin = drp0 - qnorm(0.975)*sqrt(drp0*(1-drp0)/1e3),
+                     ymax = drp0 + qnorm(0.975)*sqrt(drp0*(1-drp0)/1e3)),
+                 position = position_dodge(width = 1))
+```
+
+
+```{r, fig.cap="Expected probability that control arm is dropped using MID=5.", fig.width=8, fig.height=8}
+ggplot(dat[MID == 5],
+       aes(x = analysis, y = drp0, colour = factor(sapply(looks, max)), shape = factor(epsilon))) +
+  facet_grid(effect1 ~ effect2) +
+  geom_point(position = position_dodge(width = 1)) +
+  geom_linerange(aes(ymin = drp0 - qnorm(0.975)*sqrt(drp0*(1-drp0)/1e3),
+                     ymax = drp0 + qnorm(0.975)*sqrt(drp0*(1-drp0)/1e3)),
+                 position = position_dodge(width = 1))
+```
