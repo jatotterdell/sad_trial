@@ -1,0 +1,286 @@
+---
+title: "Sequential Design for Social Anxiety Disorder Trial"
+output: 
+  bookdown::html_document2:
+    self_contained: yes
+    theme:
+      # bootswatch: "journal"
+      bg: "#202123"
+      fg: "#B8BCC2"
+      primary: "#EA80FC"
+      secondary: "#00DAC6"
+      font_scale: 1
+      base_font:
+        google: Open Sans
+      heading_font:
+        google: Proza Libre
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+if (requireNamespace("thematic")) 
+  thematic::thematic_rmd(font = "auto")
+
+library(data.table)
+library(dtplyr)
+library(tidyverse)
+```
+
+# Design
+
+The primary outcome will be HAM-A score, a 14 item Likert scale with total scores ranging from 0 to 56.
+The endpoint is **4**-weeks post-randomisation.
+There will be 3 treatment arms: usual care, Ketamine, Ketamine + psychotherapy.
+The comparison will be baseline adjusted HAM-A score at 28 days after randomisation.
+
+Of interest are:
+
+- showing that either (or both?) Ketamine arms are superior to usual care which will trigger a decision to cease allocating participants to usual care meaning greater precision can be obtained on the relative effects of each Ketamine arm
+- assessing the relative efficacy of both Ketamine arms to decide which would progress to Phase III (e.g. of Ketamine alone non-inferior to Ketamine + psychotherapy, then progress Ketamine alone, otherwise progress the combination therapy, assuming both are superior to usual care)
+
+We expect:
+
+- up to 150 participants enrolled in the Phase II portion
+- around 1 - 2 participants enrolled per week.
+- frequent interim analyses to drop usual care ASAP
+
+The information from this initial trial would be used to plan for the follow-up trial of the "winning" treatment.
+
+Some thoughts:
+
+- Would we want to combine data from this trial with the following trial? Or treat as independent trials?
+- Would the follow-up trial use the same endpoints? Or will interest be in longer term outcomes?
+- If a longer term outcome, will the initial trial be used to assess predictive accuracy of short term outcome on longer term outcome? E.g. can this information be used for planning the follow-up trial? Is there any other information which could be collected which would help inform follow-up trial?
+
+# Outcome
+
+HAM-A is an ordinal outcome, however for simplicity we may treat it as continuous.
+A lower score means a better outcome.
+Mean value of HAM-A at baseline expected to be approximately 20.
+Hypothesize a decrease to 18 in the control arm and to 10 in both Ketamine arms.
+Assume a SD of 4.5 in HAM-A across the 3 arms.
+
+# Approximate Fixed Sample Size
+
+Assume the following:
+
+- two-sided t-test of size $\alpha/3$ where $\alpha=0.05$.
+- sample size of 50 with 10% drop-out so that n = 50.
+- target Type II error of 0.1.
+
+```{r}
+dd <- seq(1.5, 5, 0.005)
+nn <- sapply(dd, \(x) power.t.test(delta = x, sd = 4.5, power = 0.9, sig.level = 0.05 / 3)$n)
+min_nn <- 45
+min_dd <- dd[which(nn <= min_nn)[1]]
+
+par(mar = c(4, 4, 1 ,1), oma = c(0, 0, 0, 0)+.1, mgp = c(2, 0.5, 0), tcl = -0.25)
+plot(dd, nn, type = 'l', 
+     xlab = expression(delta),
+     ylab = "n (per arm)",
+     ylim = c(0, 250))
+segments(min(dd), min_nn, min_dd, min_nn, lty = 2)
+segments(min_dd, min_nn, min_dd, 0, lty = 2)
+```
+
+A sample size of $n=50$ per arm (assuming 10% drop-out) should be sufficient to identify a difference of at least 3.54 with 90% power.
+
+# Preliminary Sequential Design
+
+Consider a 3-arm trial with arms $C$ (control) and active treatments $A$ and $B$.
+Assume 1:1:1 allocation to the three arms up to a maximum sample size of 150.
+The primary endpoint occurs at 4-weeks post-randomisation and accrual is expected to be 1.5 per week.
+We specify a decision rule to drop the control arm if we believe both treatment arms to be superior according to a posterior probability exceeding a fixed threshold, $\epsilon$.
+If the control arm is dropped, recruitment continues into both treatment arms 1:1 until the maximum sample size of 150 participants.
+
+The actual analysis would be adjusted for baseline HAM-A score, but for simplicity, we assume the following model for analysis in the simulations
+$$
+Y_{ij}|\mu_j,\sigma_j \sim N(\mu_{j}, \sigma_j^2)
+$$
+for participants $i=1,...,n_j$ on treatment $j\in\{A,B,C\}$.
+To reduce the number of parameters, we assume $\sigma_j^2=\sigma^2$ for all $j$, that is the same variance applies across all treatments.
+Also,
+$$
+\mu_j = x_j^\mathsf{T}\beta
+$$
+using treatment coding for $X$.
+
+For data generation purposes in the simulations we will assume an ordinal model
+$$
+\begin{aligned}
+Z_{ij} &\sim \text{Logistic}(\mu_j, 1) \\
+Y_{ij} &\sim \text{Multinomial}(\pi_j) \\
+\pi_{jk} &= F(\gamma_k - \mu_j) - F(\gamma_{k-1} - \mu_j).
+\end{aligned}
+$$
+such that $\mathbb E[Y_{ij}]\approx 18$ for all $j$ under the null scenario, and shifts in $\mu_j$ are selected to achieve various effect sizes on the scale of $\mathbb E[Y_{ij}]$. Approximately
+
+- very large effect results in $\mathbb E[Y_{ij}]\approx 10$
+- large effect $\mathbb E[Y_{ij}]\approx 12$
+- moderate effect $\mathbb E[Y_{ij}]\approx 14$
+- small effect $\mathbb E[Y_{ij}]\approx 16$
+
+*A priori* we assume
+$$
+\beta \overset{\text{iid}}{\sim} N(\mu_0, \Sigma_0)
+$$
+where $\mu_0 = (20, 0, 0)$ and $\Sigma_0 = \text{diag}(10^2,10^2,10^2)$, that is, assume very diffuse priors for initial run.
+
+Our expectation is that $\mu_A < \mu_C$ and $\mu_B < \mu_C$, that is both Ketamine treatments are superior to usual care in reducing HAM-A. 
+Subsequently assess the relative effect $\mu_A-\mu_B$, in particular whether $\mu_A < \mu_B + \Delta$ where $\Delta = 3.3$, that is, treatment A is non-inferior to treatment B 
+
+Assume we undertake sequential analysis at total sample sizes $n_k$, $k=1,...,K$.
+At each analysis we will assess
+
+- $\text{Pr}(\mu_A < \mu_C|y)$
+- $\text{Pr}(\mu_B < \mu_C|y)$
+- $\text{Pr}(\mu_A \cap \mu_B < \mu_C|y)$
+- $\text{Pr}(\mu_A < \mu_B + \Delta|y)$
+
+For data generation, we assume a distribution of HAM-A scores at 4 weeks post-randomisation such that the mean response is about 18 under the control scenario.
+For the alternative, we consider a distribution shifted by an odds-ratio of 1/15 which results in a distribution with mean response about 10.
+These are given in \@ref(fig:dist).
+
+```{r dist, fig.cap="Assumed control distribution (white lines) of HAM-A scores at 4-weeks post-randomisation and alternative distributions (coloured lines) for various effect size."}
+library(truncdist)
+library(Hmisc)
+pt <- ptrunc(0:56, spec = "logis", a = -0.5, b = 56, 17.5, 3)
+p0 <- diff(c(0, pt))
+m0 <- sum(p0*0:56)
+s0 <- sqrt(sum(p0*(0:56 - m0)^2))
+or <- c(1/16, 1/8, 1/4, 1/2)
+p1 <- pomodm(p = p0, odds.ratio = or[1])
+m1 <- sum(p1*0:56)
+s1 <- sqrt(sum(p1*(0:56 - m1)^2))
+p2 <- pomodm(p = p0, odds.ratio = or[2])
+m2 <- sum(p2*0:56)
+p3 <- pomodm(p = p0, odds.ratio = or[3])
+m3 <- sum(p3*0:56)
+p4 <- pomodm(p = p0, odds.ratio = or[4])
+m4 <- sum(p4*0:56)
+
+Okabe_Ito <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+palette(Okabe_Ito)
+
+par(mar = c(4, 4, 1 ,1), oma = c(0, 0, 0, 0)+.1, mgp = c(2, 0.5, 0), tcl = -0.25)
+plot(0:56, p0, type = 'o', xlab = expression(y), ylab = expression("Pr"(Y*'='*y)), ylim = c(0, 0.1))
+abline(v = m0, lty = 1)
+points(0:56, p1, col = 2, type = 'o')
+abline(v = m1, col = 2)
+points(0:56, p2, col = 3, type = 'o')
+abline(v = m2, col = 3)
+points(0:56, p3, col = 4, type = 'o')
+abline(v = m3, col = 4)
+points(0:56, p4, col = 5, type = 'o')
+abline(v = m4, col = 5)
+```
+
+# Operating Characteristics
+
+In what follows, treatment 1 is control, and treatment 2 and 3 are active (A and B) treatments.
+
+Of particular interest are:
+
+- how early can we expect to drop the usual care arm?
+- what level of precision can we expect to have on the comparison $\mu_A - \mu_B$ and will it be sufficient to identify non-inferiority relative to $\Delta$ to decide which treatment to proceed with?
+
+The following is assumed:
+
+- fixed accrual of 1.5 participants per week
+- 4 weeks to observe primary endpoint
+- analysis when: 30, 60, 90, 120, and final at 150 participants reaching primary endpoint
+- control outcome distribution as per figure \@ref(fig:dist)
+- treatment outcome 1 distributions assuming: null, small, moderate, and large effect
+- treatment outcome 2 distributions assuming: null and large effect
+- decision to cease allocation to control if *both* treatments found superior (posterior probability superior > $\epsilon$ for both treatments independently, where $\epsilon\in\{0.85,0.90,0.95\}$).
+
+```{r}
+scenarios_dt <- readRDS(file = "~/out_files/mental_health_sims/basic_sequential_scenarios.rds")
+res_trials <- readRDS(file = "~/out_files/mental_health_sims/basic_sequential_sims.rds")
+res_summary <- readRDS(file = "~/out_files/mental_health_sims/basic_sequential_summary.rds")
+dat_trials <- res_trials[scenarios_dt, on = .(scenario)]
+dat <- res_summary[scenarios_dt, on = .(scenario)]
+```
+
+
+```{r, fig.cap="Expected posterior mean with standard deviations."}
+pdat <- dat_trials %>%
+  group_by(scenario, analysis, effect, epsilon) %>%
+  summarise_at(vars(m_mu_0:m_mu_2), list(`-m` = ~ mean(.x), `-s` = ~ sd(.x))) %>%
+  as_tibble() %>%
+  pivot_longer(cols = `m_mu_0_-m`:`m_mu_2_-s`, names_to = c("Treatment", "quantity"), names_sep = "-") %>%
+  pivot_wider(names_from = quantity) %>%
+  mutate(Treatment = str_replace(Treatment, "m_mu_", "")) %>%
+  mutate(Treatment = as.character(as.integer(str_replace(Treatment, "_", "")) + 1))
+
+ggplot(pdat,
+  aes(analysis, m, colour = Treatment, group = Treatment)) +
+  facet_grid(factor(epsilon, labels = c("epsilon = 0.85", "epsilon = 0.90", "epsilon = 0.95")) ~ effect) +
+  geom_pointrange(aes(ymin = m - s, ymax = m + s), size = 0.25, position = position_dodge(width = 0.5)) +
+  labs(y = "Expected posterior mean\nplus/minus SD",
+       x = "Analysis number",
+       colour = "Treatment") +
+  scale_color_viridis_d(option = "C", begin = 0.1, end = 0.9)
+```
+
+
+```{r, fig.cap="Expected sample size allocated to each treatment after 150 enrolled."}
+pdat <- melt(dat_trials[analysis == 5, .(scenario, effect, epsilon, n_enr_trt0, n_enr_trt1, n_enr_trt2)],
+     id.vars = c("scenario", "effect", "epsilon"))
+pdat[, Treatment := as.character(as.integer(gsub("n_enr_trt", "", variable)) + 1)]
+pdat <- pdat[, .(m = mean(value), s = sd(value), med = median(value)), keyby = .(scenario, effect, epsilon, Treatment)]
+ggplot(pdat,
+       aes(Treatment, m)) +
+  facet_grid(factor(epsilon,labels = c("epsilon = 0.85", "epsilon = 0.90", "epsilon = 0.95")) ~ effect) +
+  geom_pointrange(aes(ymin = m - s, ymax = m + s), size = 0.25) +
+  labs(y = "Expected sample size\nplus/minus standard deviation") +
+  ylim(0, NA)
+```
+
+
+```{r, fig.cap="Expected posterior standard deviation on comparison between treatment A (Treatment 2) and B (Treatment 3)."}
+ggplot(dat[, .(scenario, analysis, effect, epsilon, c_sigma_33)],
+       aes(analysis, sqrt(c_sigma_33))) +
+  facet_grid(factor(epsilon, labels = c("epsilon = 0.85", "epsilon = 0.90", "epsilon = 0.95")) ~ effect) +
+  geom_point() +
+  labs(y = "Posterior standard deviation", x = "Analysis number")
+```
+
+
+```{r, fig.cap="Probability of having dropped control group following each analysis."}
+ggplot(dat,
+  aes(analysis, drp0)) +
+  facet_wrap( ~ factor(epsilon, labels = c("epsilon = 0.85", "epsilon = 0.90", "epsilon = 0.95"))) +
+  geom_line(aes(colour = effect, group = effect)) +
+  labs(y = "Probability drop control by analysis",
+       x = "Analysis number",
+       colour = "Effect size") +
+  scale_y_continuous(breaks = seq(0, 1, 0.1)) +
+  scale_color_viridis_d(option = "C", begin = 0.1, end = 0.9)
+```
+
+
+```{r, fig.cap = "Probability posterior summary exceeds non-inferiority threshold at each analysis."}
+pdat <- melt(dat_trials[, 
+  .(
+    `0.90` = mean(`trt1 - trt2` > 0.90),
+    `0.95` = mean(`trt1 - trt2` > 0.95),
+    `0.975` = mean(`trt1 - trt2` > 0.975),
+    `0.99` = mean(`trt1 - trt2` > 0.99)
+  ),
+  keyby = .(scenario, analysis, effect, epsilon)], 
+  id.vars = c("scenario", "analysis", "effect", "epsilon"), variable.name = "threshold")
+ggplot(pdat,
+  aes(analysis, value)) +
+  facet_grid(factor(epsilon, labels = c("epsilon = 0.85", "epsilon = 0.90", "epsilon = 0.95")) ~ effect) +
+  geom_line(aes(colour = threshold, group = threshold)) +
+  labs(y = "Probability exceed non-inferiority threshold at analysis",
+       x = "Analysis number",
+       colour = "Threshold") +
+  scale_y_continuous(breaks = seq(0, 1, 0.1)) +
+  scale_color_viridis_d(option = "C", begin = 0.1, end = 0.9)
+```

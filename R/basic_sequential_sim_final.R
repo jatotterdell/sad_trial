@@ -6,6 +6,13 @@ library(sn)
 library(truncdist)
 library(Hmisc)
 
+
+#' n_list
+#'
+#' Create a named list from objects (from loo::n_list)
+#'
+#' @param ... Objects to include in the list
+#' @return A named list
 n_list <- function (...) {
   m <- match.call()
   out <- list(...)
@@ -25,11 +32,27 @@ n_list <- function (...) {
   return(out)
 }
 
+
+#' scenario_list
+#'
+#' Combine a list of scenario parameters into a combined list
+#'
+#' @param ... Scenario parameters
+#' @return A list
 scenario_list <- function(...) {
   argmat <- expand.grid(...)
   return(asplit(argmat, MARGIN = 1))
 }
 
+
+#' sim_accrual
+#'
+#' Simulate participant accrual into a trial
+#'
+#' @param n The number of participants to enrol
+#' @param accrual_rate The rate of accrual assuming exponential gap times
+#' @tte The time between randomisation and the primary outcome
+#' @return A data.table of accrual data
 sim_accrual <- function(n, accrual_rate = 1.5, tte = 8) {
   ds <- data.table(id = 1:n, gap = rexp(n, 1.5))
   ds[, t0 := cumsum(gap)]
@@ -37,6 +60,15 @@ sim_accrual <- function(n, accrual_rate = 1.5, tte = 8) {
   return(ds)
 }
 
+
+#' sim_outcome
+#'
+#' Simulate outcome data
+#'
+#' @param n The number of participant outcomes to simulate
+#' @param ntrt The number of treatments
+#' @param p The probability of respones y
+#' @return a data.table of outcomes
 sim_outcome <- function(n, ntrt, p) {
   ds <- CJ(
     id = 1:n,
@@ -52,26 +84,25 @@ sim_outcome <- function(n, ntrt, p) {
   return(ds)
 }
 
-sim_data <- function(n, ntrt, p) {
-  ds1 <- data.table(id = 1:n, gap = rexp(n, 1.5))
-  ds1[, t0 := cumsum(gap)]
-  ds1[, tt := t0 + 8]
 
-  ds2 <- CJ(id = 1:n, trt = 1:ntrt, sorted = TRUE)
-  setkey(ds2, id)
-  for(i in 1:ntrt) {
-    r <- rlogis(n)
-    cp <- qlogis(cumsum(c(0, p[i, ])))
-    ds2[trt == i, y := findInterval(r, cp) - 1]
-  }
-  return(list(ds1, ds2))
-}
-
+#' trial_as_dat
+#'
+#' Convert a list of trial results into a data.table
+#'
+#' @param res A named list of trial output objects
+#' @return The list converted to data.table with one row per analysis
 trial_as_dt <- function(res) {
   Reduce(function(x, y) merge(x, y, on = .(analysis, variable), all = TRUE),
          lapply(res, function(d) as.data.table(d, keep.rownames = "analysis")))
 }
 
+
+#' Simulate a trial for Phase II SAD.
+#'
+#' @param trial_par A list providing the trial parameters.
+#' @return A data.table consisting of trial results at each interim analysis
+#' @examples
+#' sim_trial()
 sim_trial <- function(
   trial_par = list(
     looks = c(30, 60, 90, 120, 150),
@@ -81,10 +112,10 @@ sim_trial <- function(
       p <- diff(c(0, pt, 1))
       rbind(p, p, p)
     },
-    mu0 = c(20, 0, 0),
-    Sigma0 = diag(5, 3)^2,
-    MID = 5,
-    NonInfMarg = 3.3,
+    mu0 = c(18, 0, 0),
+    Sigma0 = diag(c(10^2, 3.9^2, 3.9^2)),
+    MID = 2.5,
+    NonInfMarg = 2.5,
     drop_rule = "one"
   )
 ) {
@@ -181,21 +212,21 @@ sim_trial <- function(
         drp0[l, ] <- drp0[l - 1, ]
       }
     } else if (drop_rule == "two") {
-        if(all(p_ctr[l, 1:2] > epsilon)) {
-          drp0[l, ] <- 1
-          palloc[1] <- 0
-          palloc[-1] <- palloc[-1] / sum(palloc[-1])
-        } else if(l > 1) {
-          drp0[l, ] <- drp0[l - 1, ]
-        }
+      if(all(p_ctr[l, 1:2] > epsilon)) {
+        drp0[l, ] <- 1
+        palloc[1] <- 0
+        palloc[-1] <- palloc[-1] / sum(palloc[-1])
+      } else if(l > 1) {
+        drp0[l, ] <- drp0[l - 1, ]
+      }
     } else if (drop_rule == "joint") {
-        if(p_ctr[l, 4] > epsilon) {
-          drp0[l, ] <- 1
-          palloc[1] <- 0
-          palloc[-1] <- palloc[-1] / sum(palloc[-1])
-        } else if(l > 1) {
-          drp0[l, ] <- drp0[l - 1, ]
-        }
+      if(p_ctr[l, 4] > epsilon) {
+        drp0[l, ] <- 1
+        palloc[1] <- 0
+        palloc[-1] <- palloc[-1] / sum(palloc[-1])
+      } else if(l > 1) {
+        drp0[l, ] <- drp0[l - 1, ]
+      }
     }
   }
   out <- n_list(
@@ -214,6 +245,16 @@ sim_trial <- function(
   return(trial_as_dt(out))
 }
 
+
+#' sim_replicate
+#'
+#' Replicate a `sim_trial` multiple times for a given scenario
+#'
+#' @param nsim The number of simulations to repeat
+#' @param cores The number of cores to use
+#' @param ... The sim_trial scenario
+#' @return A data.table of combined simulated trials
+#' sim_replicate(10)
 sim_replicate <- function(nsim, cores = 14, ...) {
   rbindlist(
     parallel::mclapply(

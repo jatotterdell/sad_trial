@@ -1,0 +1,598 @@
+---
+title: "Factorial 2 x 2 design"
+output: 
+  bookdown::html_document2:
+    fig_align: center
+    code_folding: show
+    theme:
+      bootswatch: "journal"
+      # bg: "#202123"
+      # fg: "#B8BCC2"
+      primary: "#EA80FC"
+      secondary: "#00DAC6"
+      font_scale: 0.9
+      base_font:
+        google: Prompt
+      heading_font:
+        google: Proza Libre
+---
+
+```{r setup, include=FALSE}
+if (requireNamespace("thematic")) 
+  thematic::thematic_rmd(font = "auto")
+
+knitr::opts_chunk$set(
+  fig.align = "center",
+  fig.height = 4,
+  fig.width = 5,
+	message = FALSE,
+	warning = FALSE,
+  echo = FALSE
+)
+
+options(digits = 3)
+
+library(kableExtra)
+library(tidyverse)
+library(varapproxr)
+library(parallel)
+library(mvnfast)
+```
+
+# Preliminary
+
+As a guide for an appropriate sample size, assume a pair-wise comparison is of interest between two arms.
+Consider a test of $H_0: \text{OR}=1$ versus $H_1: \text{OR}=6$ where $\text{OR} = \pi_2(1-\pi_1)/(\pi_1(1-\pi_2))$ and $\pi_1=0.1$.
+This corresponds to the case where $\pi_2=0.4$.
+
+Assuming the aim is to control the Type II error given a fixed size $\alpha$, the sample size is calculated assuming $$
+\begin{aligned}
+\text{Var}[\ln\text{OR}] &= \left[\frac{1}{n\pi_1(1-\pi_1)} +\frac{1}{n\pi_2(1-\pi_2)}\right]\\
+n &= \frac{(z_{1-\alpha/2)} + z_{1-\beta})^2}{\ln^2(OR)}\left[\frac{1}{\pi_1(1-\pi_1)} +\frac{1}{\pi_2(1-\pi_2)}\right].
+\end{aligned}
+$$ If instead the aim is to target a given precision in the estimate $\widehat{\ln\text{OR}}$ then the sample size $$
+\begin{aligned}
+w &= \exp\left(2z_{1-\alpha/2}\sqrt{\text{Var}[\ln\text{OR}}]\right) \\
+n &= 4\left(\frac{z_{1-\alpha/2}}{\ln(w)}\right)^2\left[\frac{1}{\pi_1(1-\pi_1)} +\frac{1}{\pi_2(1-\pi_2)}\right]
+\end{aligned}
+$$ may be desired, noting that $w$ indicates the magnitude of the upper limit relative to the lower limit on the odds-ratio scale (e.g. $w=2$ implies the upper odds-ratio CI limit is twice the lower odds-ratio CI limit).
+
+```{r echo = FALSE, fig.width=8, fig.cap="Power and precision based sample sizes assuming $\\pi_1=0.1$, $\\beta=0.1$, and for precision based, $\\text{OR}=6$."}
+p_to_or <- function(p1, p2) {
+  p1 / (1 - p1) / (p2 / (1 - p2))
+}
+or_to_p <- function(p1, or) {
+  x <- or * p1 / (1 - p1)
+  return(x / (1 + x))
+}
+var_log_or <- function(p1, p2, n1, n2) {
+  1 / (n1*p1*(1 - p1)) + 1 / (n2*p2*(1 - p2))
+}
+var_log_or2 <- function(p1, p2, n) {
+  pbar <- (p1 + p2) / 2
+  4 / (n * pbar * (1 - pbar))
+}
+ss_or_pow <- function(alpha = 0.05, beta = 0.1, OR = 6, p1 = 0.1) {
+  p2 <- or_to_p(p1, OR)
+  za <- qnorm(1 - alpha/2)
+  zb <- qnorm(1 - beta)
+  n <- ((za + zb) / log(OR))^2 * (1/(p1*(1 - p1)) + 1/(p2*(1 - p2)))
+  return(n)
+}
+pow_or_ss <- function(n, alpha = 0.05, OR = 6, p1 = 0.1) {
+  p2 <- or_to_p(p1, OR)
+  z <- log(OR)*sqrt(n) / sqrt(1/(p1*(1-p1)) + 1/(p2*(1-p2)))
+  za <- qnorm(1 - alpha/2)
+  pnorm(z - za) + pnorm(-z - za)
+}
+ss_or_pre <- function(alpha = 0.05, w = 4, OR = 6, p1 = 0.1) {
+  p2 <- or_to_p(p1, OR)
+  za <- qnorm(1 - alpha/2)
+  n <- 4*(za / log(w))^2 * (1/(p1*(1 - p1)) + 1/(p2*(1 - p2)))
+  return(n)
+}
+pre_or_ss <- function(n, alpha = 0.05, p1 = 0.1, OR = 6) {
+  p2 <- or_to_p(p1, OR)
+  ss <- sqrt(1 / (n*p1*(1 - p1)) + 1 / (n*p2*(1 - p2)))
+  za <- qnorm(1 - alpha/2)
+  return(exp(za * ss)/exp(-za*ss))
+}
+
+p1 <- c(0.1, 0.15, 0.2, 0.25)
+OR <- seq(2, 6, length.out = 100)
+W <- seq(2, 9, by = 0.01)
+
+n <- do.call(
+  cbind, lapply(p1, \(y) sapply(OR, \(x) ss_or_pow(OR = x, p1 = y))))
+n_prec <- do.call(
+  cbind, lapply(p1, \(y) sapply(W, \(x) ss_or_pre(w = x, p1 = y))))
+
+par(mar = c(4, 4, 1 ,1), cex = 0.9, mfrow = c(1, 2))
+matplot(
+  OR, n, type = "l", ylim = c(0, 500), bty = 'n',
+  col = 'black', lty = 1:4,
+  xlab = expression(OR), 
+  xlim = c(0, 8),
+  ylab = "Sample size per treatment")
+text(OR[1], n[1, ], labels = sprintf("p = %.2f", p1),
+     cex = 0.7, adj = c(0, 0), pos = 2)
+text(tail(OR, 1), tail(n[, 1], 1), 
+     labels = paste0("n = ", ceiling(tail(n[, 1], 1))),
+     cex = 0.7, adj = c(0, -2.5))
+points(tail(OR,1),tail(n[, 1],1))
+points(rep(OR[1],4),n[1,])
+
+matplot(
+  W, n_prec, type = "l", ylim = c(0, 500), bty = 'n',
+  col = 'black', lty = 1:4,
+  xlab = expression(w), 
+  xlim = c(0, 11),
+  ylab = "Sample size per treatment")
+text(W[1], n_prec[1, ], labels = sprintf("p = %.2f", p1),
+     cex = 0.7, adj = c(0, 0), pos = 2)
+text(tail(W, 1), tail(n_prec[, 1], 1), 
+     labels = paste0("n = ", ceiling(tail(n_prec[, 1], 1))),
+     cex = 0.7, adj = c(0, -2.5))
+points(tail(W,1),tail(n_prec[, 1],1))
+points(rep(OR[1],4),n_prec[1,])
+```
+
+Two arms with about 50 participants per arm would be sufficient for approximately 90% power for a two-sided test of size $\alpha=0.05$ assuming an alternative hypothesis of $\pi_2=0.4$ compared to a null of $\pi_2=\pi_1=0.1$.
+However, the precision on the resulting estimate will be small (CI ratio of approximately 9 on the odds-ratio).
+
+Due to the small sample size and low probability of response, the asymptotic results may be inaccurate.
+Simulated Type I error and power using the same assumptions are below for sample size $n=50$ in each arm.
+
+```{r}
+simulate_trial <- function(n = 50, p1 = 0.1, p2 = 0.4) {
+  x <- c(0, 1)
+  y1 <- rbinom(1, n, p1)
+  y2 <- rbinom(1, n, p2)
+  fit <- glm(cbind(c(y1, y2), n - c(y1, y2)) ~ x, family = binomial())
+  p <- summary(fit)$coef[2, 4]
+  ci <- confint.default(fit)[2, ]
+  return(c(p = p, v = vcov(fit)[2,2], lo = ci[1], hi = ci[2]))
+}
+res_null <- simplify2array(
+  mclapply(1:2e4, \(x) simulate_trial(p2 = 0.1), mc.cores = 10))
+res_alt <- simplify2array(
+  mclapply(1:2e4, \(x) simulate_trial(), mc.cores = 10))
+pow_null <- mean(res_null[1, ] < 0.05)
+pow_alt <- mean(res_alt[1, ] < 0.05)
+var_null <- median(res_null[2, ])
+var_alt <- median(res_alt[2, ])
+wth_null <- median(exp(res_null[4, ] - res_null[3, ]))
+wth_alt <- median(exp(res_alt[4, ] - res_alt[3, ]))
+round(cbind(
+  Power = c(Null = pow_null, Alt = pow_alt),
+  Variance = c(Null = var_null, Alt = var_alt),
+  Width = c(Null = wth_null, Alt = wth_alt)
+), 3)
+```
+
+# Factorial Design
+
+Assume a 2 by 2 factorial design with treatment options $x_1$ and $x_2$ with linear predictor $$
+\eta = \beta_0 + \beta_1x_1 + \beta_2x_2 + \beta_3x_1x_2.
+$$
+
+```{r, include = F}
+Xtrt <- cbind(1, rbind(0, rbind(cbind(diag(1, 2), 0), 1)))
+Xeff <- cbind(1, c(-1, 1, -1, 1), c(-1, -1, 1, 1), c(1, -1, -1, 1))
+Xef2 <- cbind(1, 0.5*c(-1, 1, -1, 1), 0.5*c(-1, -1, 1, 1), 0.25*c(1, -1, -1, 1))
+colnames(Xtrt) <- colnames(Xeff) <- colnames(Xef2) <- c("1", "x1", "x2", "x1x2")
+
+
+C <- matrix(
+  c(-0.5,  0.5, -0.5, 0.5,
+    -0.5, -0.5,  0.5, 0.5,
+       1,   -1,   -1,   1,
+      -1,    1,    0,   0,
+      -1,    0,    1,   0,
+       0,    0,   -1,   1,
+       0,   -1,    0,   1), 
+  7, 4, byrow = T)
+rownames(C) <- c(
+  "Main effect 1", 
+  "Main effect 2", 
+  "Interaction",
+  "x1 alone", 
+  "x2 alone", 
+  "x1 with x2 (vs x2 alone)", 
+  "x2 with x1 (vs x1 alone)")
+C
+C %*% Xtrt
+C %*% Xeff
+C %*% Xef2
+
+C %*% solve(crossprod(Xtrt) + diag(1,4)) %*% t(C)
+C %*% solve(crossprod(Xeff) + diag(1,4)) %*% t(C)
+C %*% solve(crossprod(Xef2) + diag(1,4)) %*% t(C)
+```
+
+Depending on the contrast coding used for the design, the parameter interpretation is given in Table \@ref(tab:par-interpretation).
+
+```{r par-interpretation}
+tab <-
+  tibble(
+    `Effect ($\\boldsymbol{x\\in\\{-1,1\\}}$)` = c(
+      "$2\\beta_1$", "$2\\beta_2$", "$4\\beta_3$", 
+      "$2\\beta_1-2\\beta_3$", "$2\\beta_2-2\\beta_3$",
+      "$2\\beta_1+2\\beta_3$", "$2\\beta_2+2\\beta_3$"),
+    `Scaled Effect ($\\boldsymbol{x\\in\\{-.5,.5\\}}$)` = c(
+      "$\\beta_1$", "$\\beta_2$", "$\\beta_3$", 
+      "$\\beta_1-0.5\\beta_3$", "$\\beta_2-0.5\\beta_3$",
+      "$\\beta_1+0.5\\beta_3$", "$\\beta_2+0.5\\beta_3$"),
+    `Treatment ($\\boldsymbol{x\\in\\{0,1\\}}$)` = c(
+      "$\\beta_1 + 0.5\\beta_3$", "$\\beta_2+0.5\\beta_3$", "$\\beta_3$",
+      "$\\beta_1$", "$\\beta_2$",
+      "$\\beta_1 + \\beta_3$", "$\\beta_2 + \\beta_3$"
+    ))
+rownames(tab) <- c(
+  "Main effect 1", "Main effect 2", "Interaction", 
+  "Effect 1 w/o 2", "Effect 2 w/o 1", "Effect 1 w 2", "Effect 2 w 1")
+kable(tab, booktabs = T, escape = F, align = "r",
+      caption = "Parameter interpretation.") %>%
+  kable_styling()
+```
+
+Assume primary interest is in $\beta_1$ and $\beta_2$ with secondary interest in $\beta_3$.
+That is, we care about the main effect of each treatment which in the absence of any interaction ($\beta_3=0$) is the effect of each treatment when given alone.
+
+Given the previous calculations, if interest is primarily on the main effects, then 25 participants per group should be satisfactory assuming an effect size of $\text{OR}=6$.
+
+# Responder Model
+
+The proposed primary outcome is a comparison of the proportion of responders under each treatment.
+A responder is defined as a participant with a 35% or greater reduction in their baseline LSAS.
+Therefore, we assume the following data model$$
+\begin{aligned}
+y_i &= \text{Bernoulli}(\pi_{r(i)}) \\ 
+\text{logit}(\pi_{r}) &= \eta_r \\
+\eta_r &= x_r^{\mathsf{T}}\beta
+\end{aligned}
+$$ where $$
+\begin{aligned}
+X &= \tilde X C \\
+\tilde X &= \begin{pmatrix}
+1 & 1 & 0 & 0 & 0 \\
+1 & 0 & 1 & 0 & 0 \\
+1 & 0 & 0 & 1 & 0 \\
+1 & 0 & 0 & 0 & 1
+\end{pmatrix}
+\end{aligned}
+$$ and $C$ is the chosen coding matrix as defined in Table \@ref(tab:par-interpretation).
+
+We further assume *a priori* $$
+\beta\sim N_4(\mu,\Sigma)
+$$ with $\Sigma = \text{diag}(\tau^{2}, \lambda^{2}, \lambda^{2}, \omega^{2})$.
+
+For the current simulations we specify $\mu\in\{0,(\text{logit}(0.2),0,0,0)\}, \tau=1.8, \lambda=1$, and $\omega\in\{1,0\}$.
+The scaled effect coding was assumed.
+The following scenarios were considered
+
+```{r}
+tab <- tribble(
+  ~ Parameter, ~ Values,
+  "$p$",  "$\\{(0.1,0.1,0.1,0.1), (0.1,0.4,0.1,0.4), (0.1,0.4,0.2,0.4), (0.1,0.4,0.2,0.6)\\}$",
+  "$\\mu$", "$\\{(0,0,0,0), (\\text{logit}(0.2),0,0,0)\\}$",
+  "$\\Sigma$", "$\\{\\text{diag}(1.8,1,1,1)^2,\\text{diag}(1.8,1,1,0)^2\\}$"
+)
+kable(tab) %>%
+  kable_styling()
+```
+
+The following quantities are summarised for these simulations:
+
+-   $\mathbb E_{y|\tilde\theta}[\text{Pr}(\beta_j>0|y)>\epsilon],\ j=1,2$ - main effect of $j$ is greater than zero
+-   $\mathbb E_{y|\tilde\theta}[\text{Pr}(\beta_j-0.5\beta_3>0|y)>\epsilon],\ j=1,2$ - beneficial effect of $j$ when given alone
+-   $\mathbb E_{y|\tilde\theta}[\text{Pr}(\beta_j+0.5\beta_3>0|y)>\epsilon],\ j=1,2$ - both in combination is better than $j$ when given alone
+
+```{r}
+prior1 <- diag(c(1.8, 1, 1, 1)^2)
+prior2 <- diag(c(1.8, 1, 1, 1e-4)^2)
+# Implied covariance on eta
+# list(
+#   Xtrt %*% prior1 %*% t(Xtrt),
+#   Xtrt %*% prior2 %*% t(Xtrt)
+# )
+# list(
+#   Xeff %*% prior1 %*% t(Xeff),
+#   Xeff %*% prior2 %*% t(Xeff)
+# )
+list(
+  Xef2 %*% prior1 %*% t(Xef2),
+  Xef2 %*% prior2 %*% t(Xef2)
+)
+# Implied covariance on contrats of interest
+# list(
+#   (C %*% Xtrt) %*% prior1 %*% t(C %*% Xtrt),
+#   (C %*% Xtrt) %*% prior2 %*% t(C %*% Xtrt)
+# )
+# list(
+#   (C %*% Xeff) %*% prior1 %*% t(C %*% Xeff),
+#   (C %*% Xeff) %*% prior2 %*% t(C %*% Xeff)
+# )
+list(
+  (C %*% Xef2) %*% prior1 %*% t(C %*% Xef2),
+  (C %*% Xef2) %*% prior2 %*% t(C %*% Xef2)
+)
+```
+
+```{r, fig.cap = "Implied prior on log-odds scale."}
+# Implied priors on probability scale
+r1 <- rmvn(1e5, rep(0, 4), prior1)
+r2 <- rmvn(1e5, c(qlogis(0.2), rep(0, 3)), prior1)
+
+eta_ef21 <- r1 %*% t(Xef2)
+eta_ef22 <- r2 %*% t(Xef2)
+
+l <- layout(matrix(c(1,2,4,1,3,5), 3, 2), heights = c(1,4,4))
+par(mar = c(1,1,1,1))
+plot.new()
+text(0.5, 0.5, "Prior 1", cex = 1.5, font = 2)
+par(mar = c(4, 4, 1, 1), cex = 0.9, mgp = c(2.5, 1, 0))
+for(i in 1:4) hist(
+  eta_ef21[, i], freq = F, 
+  xlab = bquote(eta[.(i)]), main = "")
+
+l <- layout(matrix(c(1,2,4,1,3,5), 3, 2), heights = c(1,4,4))
+par(mar = c(1,1,1,1))
+plot.new()
+text(0.5, 0.5, "Prior 2", cex = 1.5, font = 2)
+par(mar = c(4, 4, 1, 1), cex = 0.9, mgp = c(2.5, 1, 0))
+for(i in 1:4) hist(
+  eta_ef22[, i], freq = F, 
+  xlab = bquote(eta[.(i)]), main = "")
+```
+
+```{r, fig.cap = "Implied prior on probabiltiy scale"}
+# eta_trt1 <- plogis(r1 %*% t(Xtrt))
+# eta_eff1 <- plogis(r1 %*% t(Xeff))
+eta_ef21 <- plogis(eta_ef21)
+# eta_trt2 <- plogis(r2 %*% t(Xtrt))
+# eta_eff2 <- plogis(r2 %*% t(Xeff))
+eta_ef22 <- plogis(eta_ef22)
+
+par(mfrow = c(2, 2), mar = c(4, 4, 1, 1), cex = 0.9)
+for(i in 1:4) hist(
+  eta_ef21[, i], freq = F, 
+  xlab = bquote(pi[.(i)]), main = "")
+par(mfrow = c(2, 2), mar = c(4, 4, 1, 1), cex = 0.9)
+for(i in 1:4) hist(
+  eta_ef22[, i], freq = F, 
+  xlab = bquote(pi[.(i)]), main = "")
+```
+
+```{r, fig.cap = "Implied joint-prior on probability scale.", fig.height=3}
+par(mfrow = c(1, 2), mar = c(4, 4, 1, 1), 
+    cex = 0.9, oma = rep(0.1, 4), mgp = c(2.5, 1, 0))
+plot(eta_ef21[, 1], eta_ef21[, 2],
+     col = rgb(0,0,0,alpha=0.025),
+     xlab = expression(pi[1]),
+     ylab = expression(pi[2]), main = "Prior 1")
+plot(eta_ef22[, 1], eta_ef22[, 2],
+     col = rgb(0,0,0,alpha=0.025),
+     xlab = expression(pi[1]),
+     ylab = expression(pi[2]), main = "Prior 2")
+```
+
+```{r}
+logreg <- cmdstanr::cmdstan_model(here::here("notes/Factorial Design/logreg.stan"))
+n <- rep(25, 4)
+p <- rep(1/10, 4)
+y <- rbinom(4, n, p)
+Sigma <- diag(c(1, 1, 1, 0.001))
+dat <- list(X = Xeff, n = n, y = y, Sigma = Sigma, mu = rep(0, 4))
+fit_vb <- varapproxr::vb_logistic_n(Xeff, y, n, rep(0, 4), Sigma, rep(0, 4), diag(1, 4), 
+                                    alg = "sj", maxiter_jj = 100)
+fit_hmc <- logreg$sample(data = dat, iter_sampling = 2500, refresh = 0, show_messages = F)
+
+draws_hmc <- posterior::as_draws_matrix(fit_hmc$draws("beta"))
+mu_draws_hmc <- draws_hmc %*% t(Xeff)
+
+mu_vb <- Xeff %*% fit_vb$mu
+sig_vb <- Xeff %*% fit_vb$Sigma %*% t(Xeff)
+```
+
+```{r, fig.cap="Compare $\\beta$ from VB with HMC."}
+par(mfrow = c(2 ,2), mar = c(4, 4, 1, 1), cex = 0.9)
+for(i in 1:4) {
+  hist(draws_hmc[,i], freq = F, main = "", breaks = 50, xlab = bquote(beta[.(i)]))
+  curve(dnorm(x, fit_vb$mu[i], sqrt(fit_vb$Sigma[i,i])), add = T)
+}
+```
+
+```{r, fig.cap="Compare $\\mu$ from VB with HMC."}
+par(mfrow = c(2 ,2), mar = c(4, 4, 1, 1), cex = 0.9)
+for(i in 1:4) {
+  hist(mu_draws_hmc[,i], freq = F, main = "", breaks = 50, xlab = bquote(mu[.(i)]))
+  curve(dnorm(x, mu_vb[i], sqrt(sig_vb[i,i])), add = T)
+}
+```
+
+```{r, fig.cap="Compare correlations between $\\beta$ from VB with HMC."}
+par(mfrow = c(1, 1), cex = 0.9)
+c1 <- 3
+c2 <- 4
+x.points <- seq(min(draws_hmc[, c1]),max(draws_hmc[, c1]),length.out=200)
+y.points <- seq(min(draws_hmc[, c2]),max(draws_hmc[, c2]),length.out=200)
+z <- matrix(0,nrow=200,ncol=200)
+mu <- fit_vb$mu[c(c1,c2)]
+sigma <- fit_vb$Sigma[c(c1,c2), c(c1,c2)]
+for (i in 1:200) {
+   for (j in 1:200) {
+    z[i,j] <- mvtnorm::dmvnorm(
+      c(x.points[i],y.points[j]), 
+      log = T, mean = mu, sigma = sigma)
+   }
+}
+contour(x.points, y.points, z, 
+        levels = quantile(z, prob = seq(0.1, 0.9, by = 0.1)), 
+        drawlabels = F,
+        xlab = bquote(beta[.(c1)]), ylab = bquote(beta[.(c2)]))
+points(draws_hmc[, c(c1,c2)], col = rgb(0, 0, 0, alpha = 0.25))
+```
+
+```{r, eval=FALSE, include=FALSE}
+p <- c(.1, .4, .2, .4)
+p <- rep(.1, 4)
+eta <- qlogis(p)
+btrue <- MASS::ginv(Xeff) %*% eta
+C %*% eta
+
+simulate_model <- function(p = rep(1/10, 4), X = Xeff) {
+  n <- rep(25, 4)
+  y <- rbinom(4, n, p)
+  Sigma <- diag(c(1.8, 1, 1, 1)^2)
+  fit_vb <- varapproxr::vb_logistic_n(
+    X, y, n, rep(0, 4), Sigma, rep(0, 4), diag(1, 4),
+    alg = "sj", tol = 1e-6, maxiter_jj = 200, maxiter = 1000)
+  return(list(
+    converged = fit_vb$converged, 
+    y = y,
+    beta = fit_vb$mu, beta_sigma = fit_vb$Sigma,
+    mu = X %*% fit_vb$mu, mu_sigma = X %*% fit_vb$Sigma %*% t(X),
+    me = C %*%  X %*% fit_vb$mu, me_sigma = (C %*% X) %*% fit_vb$Sigma %*% t(C %*% X)))
+}
+
+res   <- mclapply(1:1e4, \(x) simulate_model(p = p, X = Xeff), mc.cores = 10)
+beta  <- simplify2array(lapply(res, `[[`, "beta"), higher = T)[, 1, ]
+beta_sigma <- simplify2array(lapply(res, `[[`, "beta_sigma"), higher = T)
+mu  <- simplify2array(lapply(res, `[[`, "mu"), higher = T)[, 1, ]
+mu_sigma <- simplify2array(lapply(res, `[[`, "mu_sigma"), higher = T)
+me  <- simplify2array(lapply(res, `[[`, "me"), higher = T)[, 1, ]
+me_sigma <- simplify2array(lapply(res, `[[`, "me_sigma"), higher = T)
+
+round(apply(beta, 1, mean), 2)
+apply(sigma, 1:2, mean)
+apply(mu, 1, \(x) mean(plogis(x)))
+apply(mu_sigma, 1:2, mean)
+
+apply(me, 1, mean)
+apply(me_sigma, 1:2, mean)
+
+cbind(
+  True = btrue[, 1],
+  Mean = apply(beta, 1, mean),
+  `True mu` = eta,
+  `Mean mu` = apply(mu, 1, mean)
+)
+```
+
+```{r}
+library(qs)
+configs <- qread(file = "~/out_files/mental_health_sims/basic_configs.qs")
+res     <- qread(file = "~/out_files/mental_health_sims/basic_sim_results.qs")
+
+tab_configs <- configs %>%
+  transmute(
+    ID = 1:n(),
+    `$\\boldsymbol{\\mu}$` = sapply(mu0, \(x) paste0('(', paste0(round(x,2), collapse = ", "), ')')),
+    `$\\textbf{diag}(\\boldsymbol{\\Sigma})$` = sapply(Sigma, \(x) paste0('(', paste0(round(diag(x),2), collapse = ", "), ')')),
+    `$\\boldsymbol{p}$` = sapply(p, \(x) paste0('(', paste0(x, collapse = ", "), ')')))
+kable(tab_configs, caption="Simulated configurations.") %>%
+  kable_styling() %>%
+  collapse_rows(1:3)
+```
+
+```{r}
+X <- configs[1, X][[1]]
+C <- configs[1, C][[1]]
+
+# Summarising functions
+exp_relative_ci <- function(res) {
+  apply(apply(exp(simplify2array(lapply(res, `[[`, "ci_contr"))), 2:3, \(x) x[2]/x[1]), 1, mean)
+}
+exp_ci_width <- function(res) {
+  apply(apply(simplify2array(lapply(res, `[[`, "ci_contr")), 2:3, diff), 1, mean)
+}
+exp_decide_contr_gt0 <- function(res, thres = 0.975) {
+  rowMeans(simplify2array(lapply(res, `[[`, "gt0_contr")) > thres)
+}
+exp_par <- function(res, par = "mu_beta") {
+  rowMeans(simplify2array(lapply(res, \(x) `[[`(x, par))))
+}
+exp_par_var <- function(res, par = "sig_beta") {
+  rowMeans(simplify2array(lapply(res, \(x) sqrt(diag(`[[`(x, par))))))
+}
+
+tab <- as_tibble(do.call(rbind, lapply(res, exp_decide_contr_gt0, thres = 0.975)))
+tab <- tab %>% rename(`x1 with x2 (vs x2 alone)` = 
+                 "x1 when given with x2 (vs x2 alone)",
+               `x2 with x1 (vs x1 alone)` = 
+                 "x2 when given with x1 (vs x1 alone)")
+tab %>% 
+  mutate(ID = 1:n()) %>% 
+  select(ID, everything()) %>%
+  kable(digits = 2, 
+        caption = "Power: $\\mathbb E[\\text{Pr}(\\beta>0|y)>0.975]$") %>%
+  kable_styling()
+```
+
+```{r}
+# Precision
+tab <- as_tibble(do.call(rbind, lapply(res, exp_relative_ci)))
+tab <- tab %>% rename(`x1 with x2 (vs x2 alone)` = 
+                 "x1 when given with x2 (vs x2 alone)",
+               `x2 with x1 (vs x1 alone)` = 
+                 "x2 when given with x1 (vs x1 alone)")
+tab %>% 
+  mutate(ID = 1:n()) %>% 
+  select(ID, everything()) %>%
+  kable(digits = 0, 
+        caption = "Precision: $\\mathbb E[\\text{ratio of CI}$") %>%
+  kable_styling()
+```
+
+<!-- # Normal Model -->
+
+<!-- Assume equal sample size of $n$ in each combination. -->
+<!-- Assume $\sigma^2$ is known. -->
+<!-- Assume we were to model LSAS score directly as $$ -->
+<!-- \begin{aligned} -->
+<!-- \beta &\sim \text{Normal}(\mu,\Sigma) \\ -->
+<!-- \hat\beta | \beta &\sim \text{Normal}(\beta, C) \\ -->
+<!-- \beta|\hat\beta &\sim \text{Normal}(Sm, S) \\ -->
+<!-- C &= \sigma^2(X^\mathsf{T}X)^{-1} \\ -->
+<!-- S^{-1} &= C^{-1}+\Sigma^{-1} \\ -->
+<!-- m &= C^{-1}\hat\beta +  \Sigma^{-1}\mu -->
+<!-- \end{aligned} -->
+<!-- $$ -->
+
+<!-- If standardised effect coding is used then $$ -->
+<!-- S = \begin{pmatrix} -->
+<!-- (4n/\sigma^2+1/\lambda^2)^{-1} & 0 & 0 & 0 \\ -->
+<!-- 0 & (n/\sigma^2 + 1/\tau_1^2)^{-1} & 0 & 0 \\ -->
+<!-- 0 & 0 & (n/\sigma^2 + 1/\tau_2^2)^{-1}  & 0 \\ -->
+<!-- 0 & 0 & 0 & (n/(4\sigma^2) + 1/\nu^2)^{-1} \\ -->
+<!-- \end{pmatrix} -->
+<!-- $$ -->
+
+<!-- Suppose $\Sigma = \text{diag}(\lambda^2,\tau_1^2,\tau_2^2,\nu^2)$. -->
+<!-- If $\mu_3 = 0$ and $\nu^2=0$ then no interaction. -->
+
+<!-- ```{r} -->
+<!-- Xf <- cbind(1, diag(1, 4)) -->
+<!-- C <- solve(crossprod(Xeff)) -->
+<!-- bhat <- MASS::ginv(Xeff) -->
+
+<!-- C2 <- solve(crossprod(Xef2)) -->
+<!-- bhat2 <- MASS::ginv(Xef2) -->
+
+<!-- f_S <- function(X, Sigma, sigma = 1) { -->
+<!--   Cinv <- crossprod(X)/sigma^2 -->
+<!--   return(solve(Cinv + solve(Sigma))) -->
+<!-- } -->
+<!-- f_m <- function(bhat, S, mu, Sigma) { -->
+<!--   m <- solve(S) %*% bhat + solve(Sigma) %*% mu -->
+<!--   return(m) -->
+<!-- } -->
+<!-- ``` -->
+
+<!-- ```{r, include=F, eval=F} -->
+<!-- mod <- cmdstanr::cmdstan_model(here::here("notes/Factorial Design/mod.stan")) -->
+<!-- dat <- list(X = Xef2, y = rnorm(4,0,1), Sigma = diag(c(10,10,10,10)^2), mu = rep(0, 4), sigma = 1) -->
+<!-- fit <- mod$sample(data = dat) -->
+<!-- sam <- as_draws_matrix(fit$draws("beta")) -->
+<!-- ``` -->
