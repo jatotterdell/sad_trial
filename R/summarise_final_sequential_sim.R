@@ -51,9 +51,9 @@ add_facet_labs <- function(p, labelT = "", labelR = "") {
   return(g)
 }
 
-scenarios_dt <- readRDS(file = "~/out_files/mental_health_sims/basic_sequential_scenarios_final2.rds")
-dat_trial <- readRDS(file = "~/out_files/mental_health_sims/basic_sequential_sims_final2.rds")
-dat_sum <- readRDS(file = "~/out_files/mental_health_sims/basic_sequential_summary_final2.rds")
+scenarios_dt <- readRDS(file = "~/out_files/mental_health_sims/basic_sequential_scenarios_final4.rds")
+dat_trial <- readRDS(file = "~/out_files/mental_health_sims/basic_sequential_sims_final4.rds")
+dat_sum <- readRDS(file = "~/out_files/mental_health_sims/basic_sequential_summary_final4.rds")
 
 dat_trial[, analysis := as.integer(analysis)]
 # Note that, if we stop at analysis 3, say, then analysis 4 is final, but
@@ -170,8 +170,8 @@ ggplot(final_cycle,
 
 # Probability of having ASSERTED for treatment 1
 prob_trt1 <- dat_trial_complete[, .(
-  `Effective\nP(d1 < 0) > 0.975` = mean(eff1),
-  `Futile\nP(d1 < -2.5) < 0.05` = mean(fut1),
+  `Effective\nP(d1 < 0) > 0.99` = mean(eff1),
+  `Futile\nP(d1 < -2) < 0.05` = mean(fut1),
   `Inferior\nP(d1-d2 < 0) < 0.025` = mean(inf1),
   `Highly effective\nP(d1 < -5) > 0.85` = mean(heff1)),
   by = .(Analysis = analysis, effect1, effect2)]
@@ -197,8 +197,8 @@ grid.arrange(p_trt1)
 
 # Probability of having ASSERTED for treatment 2
 prob_trt2 <- dat_trial_complete[, .(
-  `Effective\nP(d1 < 0) > 0.975` = mean(eff2),
-  `Futile\nP(d1 < -2.5) < 0.05` = mean(fut2),
+  `Effective\nP(d1 < 0) > 0.99` = mean(eff2),
+  `Futile\nP(d1 < -2) < 0.05` = mean(fut2),
   `Inferior\nP(d1-d2 < 0) < 0.025` = mean(inf2),
   `Highly effective\nP(d1 < -5) > 0.85` = mean(heff2)),
   by = .(Analysis = analysis, effect1, effect2)]
@@ -224,8 +224,8 @@ grid.arrange(p_trt2)
 
 # Probability of assertion for both treatments
 prob_both <- dat_trial_complete[, .(
-  `Effective\nP(d1 < 0) > 0.975` = mean(eff1 & eff2),
-  `Futile\nP(d1 < -2.5) < 0.05` = mean(fut1 & fut2),
+  `Effective\nP(d1 < 0) > 0.99` = mean(eff1 & eff2),
+  `Futile\nP(d1 < -2) < 0.05` = mean(fut1 & fut2),
   `Inferior\nP(d1-d2 < 0) < 0.025` = mean(inf1 & inf2),
   `Highly effective\nP(d1 < -5) > 0.85` = mean(heff1 & heff2)),
   by = .(Analysis = analysis, effect1, effect2)]
@@ -253,8 +253,8 @@ grid.arrange(p_both)
 
 # Probability of assertion for either treatments
 prob_any <- dat_trial_complete[, .(
-  `Effective\nP(d1 < 0) > 0.975` = mean(eff1 | eff2),
-  `Futile\nP(d1 < -2.5) < 0.05` = mean(fut1 | fut2),
+  `Effective\nP(d1 < 0) > 0.99` = mean(eff1 | eff2),
+  `Futile\nP(d1 < -2) < 0.05` = mean(fut1 | fut2),
   `Inferior\nP(d1-d2 < 0) < 0.025` = mean(inf1 | inf2),
   `Highly effective\nP(d1 < -5) > 0.85` = mean(heff1 | heff2)),
   by = .(Analysis = analysis, effect1, effect2)]
@@ -280,4 +280,4 @@ grid.arrange(p_any)
 
 gg <- arrangeGrob(p_trt1, p_trt2, p_any, p_both, ncol = 2)
 grid.arrange(gg)
-ggsave("summary_plot2.pdf", grid.arrange(gg), dpi = 240, width = 420, height = 350, units = "mm")
+ggsave("summary_plot4.pdf", grid.arrange(gg), dpi = 240, width = 420, height = 350, units = "mm")

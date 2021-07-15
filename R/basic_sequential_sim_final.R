@@ -114,6 +114,8 @@ trial_as_dt <- function(res) {
 #'    1 - futility (half the large MD),
 #'    2 - treatment relative efficacy (large MD),
 #'    3 - highly effective (large MD)
+#' - stop_rule: 1 stop if
+#' - drop_rule: 1 drop control if one treatment superior, 2 drop only if both superior
 #' @return A data.table consisting of trial results at each interim analysis
 #' @examples
 #' sim_trial()
@@ -128,7 +130,7 @@ sim_trial <- function(
     },
     mu0 = c(18, 0, 0),
     Sigma0 = diag(c(10^2, 6^2, 6^2)),
-    Delta = c(2.5, 5, 5),
+    Delta = c(2.5, 5, 5, 0),
     stop_rule = 1,
     drop_rule = 1
   )
@@ -240,7 +242,8 @@ sim_trial <- function(
     m_sigma[l, ] <- Sig[lower.tri(Sig, diag = T)]
     c_mu[l, ] <- ctr_mu
     c_sigma[l, ] <- ctr_sig[lower.tri(ctr_sig, diag = T)]
-    p_mon[l, ] <- c(pnorm(0, ctr_mu, sqrt(diag(ctr_sig))),
+    p_mon[l, ] <- c(pnorm(-Delta[4], ctr_mu[1:2], sqrt(diag(ctr_sig)[1:2])), # TRT better than PBO by Delta[4] (effectiveness)
+                    pnorm(0, ctr_mu[3:4], sqrt(diag(ctr_sig)[3:4])),         # TRT better than other TRT (relative effectiveness)
                     pnorm(-Delta[1], ctr_mu[1:2], sqrt(diag(ctr_sig)[1:2])), # TRT better than PBO by Delta[1] (futility)
                     pnorm(-Delta[2], ctr_mu[3:4], sqrt(diag(ctr_sig)[3:4])), # TRT better than other TRT by Delta[2] (relative efficacy)
                     pnorm(-Delta[3], ctr_mu[1:2], sqrt(diag(ctr_sig)[1:2]))) # TRT better than PBO by Delta[3] (highly effective)
@@ -255,12 +258,12 @@ sim_trial <- function(
       i_heff[l, ] <- p_mon[l, 9:10] > epsilon[4]
       if(drop_rule == 1) {
         i_drp[l, ] <- c(
-          any(p_mon[l, 1:2] > epsilon[1]), # either treatment superior
+          any(p_mon[l, 1:2] > epsilon[1]), # drop PBO if either treatment superior
           (p_mon[l, 5:6] < epsilon[2]) | (p_mon[l, 3:4] < epsilon[3]) # treatment futile or inferior to other treatment
         )
       } else if(drop_rule == 2) {
         i_drp[l, ] <- c(
-          all(i_eff[l, ] == 1), # both treatments superior
+          all(i_eff[l, ] == 1), # drop PBO if both treatments superior
           (p_mon[l, 5:6] < epsilon[2]) | (p_mon[l, 3:4] < epsilon[3]) # treatment futile or inferior to other treatment
         )
       }
@@ -291,7 +294,7 @@ sim_trial <- function(
     # Stop rule 2:
     # - both treatments futile
     # - both treatments effective
-    # - one treatment promising and better than the other
+    # - one treatment effective and better than the other
     if(stop_rule == 1) {
       i_stp[l, ] <- all(i_fut[l, ] == 1) | all(i_heff[l, ] == 1) | (i_eff[l, 1] & i_inf[l, 2]) | (i_eff[l, 2] & i_inf[l, 1])
     } else if(stop_rule == 2) {
