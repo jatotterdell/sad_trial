@@ -2,7 +2,7 @@
 
 source("R/basic_sequential_sim.R")
 
-# Set up a NULL and ALTERNATIVE scenario
+# Data Generation setup 1
 pt <- ptrunc(0:56, spec = "logis", a = -0.5, b = 56, 17.5, 3)
 p0 <- diff(c(0, pt))
 m0 <- sum(p0*0:56)

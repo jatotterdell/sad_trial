@@ -4,3 +4,4 @@ papers/*
 *.pdf
 Stan/
 background/
+.Rproj.user
